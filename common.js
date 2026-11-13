@@ -12,7 +12,7 @@
 // On your own computer the server is at 127.0.0.1:3000.
 // Once the pages are online (GitHub Pages), they must talk to the ONLINE server.
 // After you deploy the server on Render, paste its address below (no slash at the end).
-const ONLINE_SERVER_URL = "https://PASTE-YOUR-RENDER-ADDRESS-HERE.onrender.com";
+const ONLINE_SERVER_URL = "https://ai-lecturer-b0qs.onrender.com";
 
 const IS_LOCAL = ["127.0.0.1", "localhost", ""].includes(window.location.hostname);
 const SERVER_URL = IS_LOCAL ? "http://127.0.0.1:3000" : ONLINE_SERVER_URL;
