@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contents | AI Lecturer</title>
+  <link rel="stylesheet" href="outline.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="back-link" href="generate.html">&larr; New upload</a>
+    <p class="topbar-label" id="docMeta">Your material</p>
+    <h1 class="topbar-title" id="docTitle">Loading...</h1>
+  </header>
+
+  <main class="page">
+
+    <!-- Teaching choices (shared with the upload page) -->
+    <section class="prefs" aria-label="How should it teach?">
+      <div class="field">
+        <label for="levelSelect">Level</label>
+        <select id="levelSelect">
+          <option>University</option>
+          <option>Secondary school</option>
+          <option>Primary school</option>
+          <option>Professional learning</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="difficultySelect">Depth</label>
+        <select id="difficultySelect">
+          <option>Very simple</option>
+          <option>Standard</option>
+          <option>Detailed</option>
+          <option>Advanced / academic</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="approachSelect">Approach</label>
+        <select id="approachSelect">
+          <option value="exam">Exam mode: exact wording</option>
+          <option value="explain">Explain in new words</option>
+        </select>
+      </div>
+    </section>
+
+    <p class="hint" id="outlineNote"></p>
+
+    <!-- The contents tree is built by outline.js -->
+    <div id="tree" class="tree" aria-live="polite"></div>
+  </main>
+
+  <!-- Sticks to the bottom of the screen while a lesson is being prepared -->
+  <div class="busy-bar" id="busyBar" hidden>
+    <span id="busyText"></span>
+  </div>
+
+  <script src="common.js"></script>
+  <script src="outline.js"></script>
+</body>
+</html>

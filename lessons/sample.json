@@ -1,0 +1,81 @@
+{
+  "title": "Polymorphism",
+  "segments": [
+    {
+      "speech": "Welcome to today's lesson. We are going to look at one of the most important ideas in object oriented programming, called polymorphism.",
+      "subtitle": "Welcome. Today: polymorphism.",
+      "source": "added",
+      "board": {
+        "type": "title",
+        "tag": "Lesson",
+        "heading": "POLYMORPHISM",
+        "text": "One of the big ideas of object oriented programming"
+      }
+    },
+    {
+      "speech": "Polymorphism means the same interface can have different behaviours. In simple words, you give the same instruction to different things, and each one responds in its own way.",
+      "subtitle": "Same interface, different behaviours.",
+      "source": "document",
+      "board": {
+        "type": "definition",
+        "tag": "Definition",
+        "heading": "POLYMORPHISM",
+        "text": "Same interface, different behaviours."
+      }
+    },
+    {
+      "speech": "Think about animals. We have a general type called Animal. Dog and Cat are both kinds of Animal, so both of them can make a sound.",
+      "subtitle": "Dog and Cat are both kinds of Animal.",
+      "source": "added",
+      "board": {
+        "type": "diagram",
+        "tag": "Example",
+        "heading": "Animals",
+        "root": "Animal",
+        "children": ["Dog → bark()", "Cat → meow()"],
+        "highlight": -1
+      }
+    },
+    {
+      "speech": "Look at the dog first. When we tell a dog to make a sound, it barks.",
+      "subtitle": "A Dog barks.",
+      "source": "added",
+      "board": {
+        "type": "diagram",
+        "tag": "Example",
+        "heading": "Animals",
+        "root": "Animal",
+        "children": ["Dog → bark()", "Cat → meow()"],
+        "highlight": 0
+      }
+    },
+    {
+      "speech": "Now the cat. We gave the cat the very same instruction, but this time it meows. Same instruction, different behaviour. That is polymorphism.",
+      "subtitle": "A Cat meows. Same instruction, different behaviour.",
+      "source": "added",
+      "board": {
+        "type": "diagram",
+        "tag": "Example",
+        "heading": "Animals",
+        "root": "Animal",
+        "children": ["Dog → bark()", "Cat → meow()"],
+        "highlight": 1
+      }
+    },
+    {
+      "speech": "Let us recap. Polymorphism means one interface with many behaviours. It lets us write simpler code, because we can treat different objects in the same way.",
+      "subtitle": "Recap: one interface, many behaviours.",
+      "source": "added",
+      "board": {
+        "type": "list",
+        "tag": "Recap",
+        "heading": "Remember",
+        "items": [
+          "One interface, many behaviours",
+          "Each object responds in its own way",
+          "Simpler, more flexible code"
+        ]
+      }
+    }
+  ]
+}

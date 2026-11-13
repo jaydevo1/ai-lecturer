@@ -1,0 +1,93 @@
+/* Styles for the temporary "make a lesson" page.
+   Uses the same colours as the classroom. */
+:root {
+  --page: #f6f1e7;
+  --ink: #2b2118;
+  --muted: #7a6c5d;
+  --board: #1f4d3a;
+  --line: #e4dccd;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: var(--page);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+.page { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; }
+h1 { font-size: 1.6rem; margin-bottom: 6px; }
+.intro { color: var(--muted); margin-bottom: 20px; }
+
+.form { display: flex; flex-direction: column; gap: 12px; }
+label { font-size: 0.85rem; font-weight: 600; }
+
+textarea, select {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  background: #fff;
+}
+textarea { resize: vertical; }
+
+.row { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 6px; flex: 1; }
+
+.btn-generate {
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--board);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+  min-height: 48px;
+}
+.btn-generate:disabled { opacity: 0.6; cursor: wait; }
+
+.status { min-height: 1.4em; color: var(--muted); }
+.status.is-error { color: #b3392b; }
+
+@media (min-width: 600px) {
+  .row { flex-direction: row; }
+}
+
+/* ---------- Added in version 3: cards, file picker, hint text ---------- */
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.card h2 { font-size: 1.05rem; margin-bottom: 10px; }
+.hint { color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
+
+input[type="file"] {
+  width: 100%;
+  padding: 12px;
+  border: 1px dashed var(--muted);
+  border-radius: var(--radius);
+  background: var(--page);
+  font: inherit;
+}
+
+/* ---------- Saved material list ---------- */
+.saved-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.saved-list a {
+  display: block;
+  padding: 12px 14px;
+  min-height: 44px;
+  border: 1px solid var(--line, #e4dccd);
+  border-radius: 10px;
+  background: #fbf8f1;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+}
+#savedCard[hidden] { display: none; }

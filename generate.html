@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Make a lesson | AI Lecturer</title>
+  <link rel="stylesheet" href="generate.css">
+</head>
+<body>
+  <main class="page">
+    <h1>Make a lesson</h1>
+    <p class="intro">Upload your course material and pick a section to be taught, or paste some text.</p>
+
+    <!-- Material uploaded before: tap one to go straight to its contents (generate.js fills this in) -->
+    <section class="card" id="savedCard" hidden>
+      <h2>Your saved material</h2>
+      <p class="hint">Pick up where you left off. No need to upload again.</p>
+      <ul class="saved-list" id="savedList"></ul>
+    </section>
+
+    <!-- How should the lecturer teach? (remembered for next time) -->
+    <section class="card">
+      <h2>How should it teach?</h2>
+      <div class="row">
+        <div class="field">
+          <label for="levelSelect">Your level</label>
+          <select id="levelSelect">
+            <option>University</option>
+            <option>Secondary school</option>
+            <option>Primary school</option>
+            <option>Professional learning</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="difficultySelect">Depth</label>
+          <select id="difficultySelect">
+            <option>Very simple</option>
+            <option>Standard</option>
+            <option>Detailed</option>
+            <option>Advanced / academic</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="approachSelect">Approach</label>
+          <select id="approachSelect">
+            <option value="exam">Exam mode: keep my material's exact wording</option>
+            <option value="explain">Explain simply in new words</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Option 1: upload a file -->
+    <section class="card">
+      <h2>1. Upload a PDF or photos</h2>
+      <p class="hint">One PDF that has selectable text, or up to 6 photos of pages (PNG, JPG or WEBP). About 14 MB in total.</p>
+      <form id="uploadForm" class="form">
+        <input type="file" id="fileInput" accept=".pdf,application/pdf,image/png,image/jpeg,image/webp" multiple>
+        <button class="btn-generate" id="uploadBtn" type="submit">Upload and build contents</button>
+        <p class="status" id="uploadStatus"></p>
+      </form>
+    </section>
+
+    <!-- Option 2: paste text -->
+    <section class="card">
+      <h2>2. Or paste text</h2>
+      <form id="lessonForm" class="form">
+        <label for="materialInput">Study material</label>
+        <textarea id="materialInput" rows="8" maxlength="15000"
+          placeholder="Paste a few paragraphs from your course material here (up to about 15,000 characters)..." required></textarea>
+        <button class="btn-generate" id="generateBtn" type="submit">Generate lesson</button>
+        <p class="status" id="statusMsg"></p>
+      </form>
+    </section>
+  </main>
+
+  <script src="common.js"></script>
+  <script src="generate.js"></script>
+</body>
+</html>

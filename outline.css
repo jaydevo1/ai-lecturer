@@ -1,0 +1,116 @@
+/* =========================================================
+   CONTENTS PAGE STYLES (same colour tokens as the classroom)
+   ========================================================= */
+:root {
+  --page: #f6f1e7;
+  --ink: #2b2118;
+  --muted: #7a6c5d;
+  --board: #1f4d3a;
+  --board-ink: #f4f1e8;
+  --accent: #e8a33d;
+  --card: #ffffff;
+  --line: #e4dccd;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: var(--page);
+  color: var(--ink);
+  min-height: 100vh;
+  padding-bottom: 80px;            /* room for the busy bar */
+}
+
+/* ---------- Top bar ---------- */
+.topbar { background: var(--card); border-bottom: 1px solid var(--line); padding: 12px 16px; }
+.back-link { color: var(--board); font-size: 0.85rem; text-decoration: none; }
+.topbar-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 8px; }
+.topbar-title { font-size: 1.2rem; }
+
+.page { max-width: 760px; margin: 0 auto; padding: 16px; }
+
+/* ---------- Teaching choices ---------- */
+.prefs { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.field { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+label { font-size: 0.8rem; font-weight: 600; }
+select {
+  width: 100%; padding: 10px; min-height: 44px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: #fff; font: inherit;
+}
+.hint { color: var(--muted); font-size: 0.85rem; margin-bottom: 12px; }
+
+/* ---------- The tree ---------- */
+.tree { display: flex; flex-direction: column; gap: 8px; }
+
+details {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+details > details, details > .leaf { margin: 0 10px 8px; }       /* inner items sit inside the outer card */
+summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  min-height: 44px;
+  font-weight: 600;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "\25B8"; color: var(--accent); }       /* small arrow */
+details[open] > summary::before { content: "\25BE"; }
+.depth-1 > summary { font-weight: 600; font-size: 0.95rem; }
+.depth-2 > summary { font-weight: 500; font-size: 0.92rem; }
+
+.meta { color: var(--muted); font-size: 0.75rem; font-weight: 400; margin-left: auto; white-space: nowrap; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px 10px; }
+
+.leaf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #fbf8f1;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.leaf-title { flex: 1; min-width: 160px; font-size: 0.92rem; }
+.leaf.is-short .leaf-title { color: var(--muted); }
+
+.btn {
+  padding: 8px 14px;
+  min-height: 40px;
+  border: 1px solid var(--board);
+  background: var(--board);
+  color: var(--board-ink);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.btn.secondary { background: transparent; color: var(--board); }
+.btn:disabled { opacity: 0.5; cursor: wait; }
+.short-note { color: var(--muted); font-size: 0.78rem; }
+
+/* ---------- Busy bar ---------- */
+.busy-bar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  padding: 14px 16px;
+  background: var(--board);
+  color: var(--board-ink);
+  font-size: 0.9rem;
+  z-index: 10;
+}
+.busy-bar.is-error { background: #b3392b; }
+.busy-bar[hidden] { display: none; }
+
+@media (min-width: 700px) {
+  .prefs { flex-direction: row; }
+}

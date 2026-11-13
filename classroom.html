@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- viewport tag makes the page scale properly on phones -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Classroom | AI Lecturer</title>
+  <link rel="stylesheet" href="classroom.css">
+</head>
+<body>
+
+  <!-- ===== TOP BAR: lesson title + progress ===== -->
+  <header class="topbar">
+    <div class="topbar-text">
+      <p class="topbar-label" id="topbarLabel">Now teaching</p>
+      <h1 class="topbar-title" id="lessonTitle">Polymorphism</h1>
+      <!-- player.js shows this link only for lessons made from an uploaded document -->
+      <a class="contents-link" id="contentsLink" href="outline.html" hidden>&#9776; Contents</a>
+    </div>
+    <div class="progress">
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <span class="progress-text" id="progressText">Section 1 of 6</span>
+    </div>
+  </header>
+
+  <!-- ===== THE CLASSROOM SCENE =====
+       Everything below sits INSIDE one "stage", like a frame of a lesson video:
+       room background -> board on the wall -> teacher standing -> captions. -->
+  <main class="stage-wrap">
+    <section class="stage" aria-label="Virtual classroom">
+
+      <!-- 1. ROOM BACKGROUND (decoration only, hidden from screen readers) -->
+      <div class="room" aria-hidden="true">
+        <div class="wall"></div>
+        <div class="floor"></div>
+
+        <!-- Window -->
+        <svg class="deco deco-window" viewBox="0 0 100 120">
+          <rect x="2" y="2" width="96" height="116" rx="4" fill="#8a6a3b"/>
+          <rect x="8" y="8" width="84" height="104" rx="2" fill="#bfe3f2"/>
+          <circle cx="68" cy="34" r="12" fill="#fff3b0"/>
+          <ellipse cx="30" cy="52" rx="18" ry="7" fill="#ffffff" opacity="0.85"/>
+          <rect x="47" y="8" width="6" height="104" fill="#8a6a3b"/>
+          <rect x="8" y="57" width="84" height="6" fill="#8a6a3b"/>
+        </svg>
+
+        <!-- Plant -->
+        <svg class="deco deco-plant" viewBox="0 0 80 120">
+          <path d="M40 78 C20 60 12 40 20 18 C34 30 40 52 40 78 Z" fill="#3f8f5a"/>
+          <path d="M40 78 C60 58 70 38 60 14 C46 28 40 52 40 78 Z" fill="#2f7a4a"/>
+          <path d="M40 80 C38 56 38 36 40 8 C44 36 44 56 40 80 Z" fill="#4aa56a"/>
+          <path d="M20 80 H60 L54 116 H26 Z" fill="#b5653a"/>
+          <rect x="18" y="76" width="44" height="8" rx="3" fill="#c97a4b"/>
+        </svg>
+      </div>
+
+      <!-- 2. STATUS BADGE (player.js updates the dot and the status text) -->
+      <div class="stage-badge">
+        <span class="speaking-dot" id="speakingDot" title="Lecturer is speaking"></span>
+        <span class="badge-name">Lecturer</span>
+        <span class="badge-status" id="lecturerStatus">Ready to teach</span>
+      </div>
+
+      <!-- 3. TEACHING BOARD, hanging on the wall.
+              player.js replaces everything inside #boardContent. -->
+      <section class="board" aria-label="Teaching board">
+        <div class="board-inner" id="boardContent">
+          <p class="board-tag">Definition</p>
+          <h2 class="board-heading">POLYMORPHISM</h2>
+          <p class="board-text">Same interface, different behaviours.</p>
+
+          <div class="board-diagram">
+            <div class="node node-root">Animal</div>
+            <div class="branches">
+              <div class="node node-active">Dog &rarr; bark()</div>
+              <div class="node">Cat &rarr; meow()</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. THE TEACHER, standing beside the board, drawn as SVG.
+              The mouth has id="mouth" so player.js can open and close it.
+              The head is inside a scaled group, so the mouth's numbers
+              (ry 3 and 11) keep working exactly as before. -->
+      <div class="teacher" role="img" aria-label="Virtual lecturer">
+        <svg class="teacher-svg" viewBox="0 0 220 420">
+          <!-- floor shadow -->
+          <ellipse cx="110" cy="404" rx="66" ry="9" fill="rgba(0,0,0,0.18)"/>
+
+          <!-- legs and shoes -->
+          <rect x="80" y="250" width="27" height="142" rx="7" fill="#33364a"/>
+          <rect x="113" y="250" width="27" height="142" rx="7" fill="#33364a"/>
+          <ellipse cx="92" cy="395" rx="21" ry="8" fill="#2b2118"/>
+          <ellipse cx="128" cy="395" rx="21" ry="8" fill="#2b2118"/>
+
+          <!-- arm hanging down (right side of the picture) -->
+          <path d="M150 152 C170 192 168 236 162 262" stroke="#1f4d3a" stroke-width="23" stroke-linecap="round" fill="none"/>
+          <circle cx="162" cy="270" r="11" fill="#f2c9a5"/>
+
+          <!-- neck -->
+          <rect x="100" y="102" width="20" height="34" rx="8" fill="#e5b894"/>
+
+          <!-- body: blazer, shirt, collar line -->
+          <path d="M68 142 C68 132 84 128 110 128 C136 128 152 132 152 142 L160 264 L60 264 Z" fill="#1f4d3a"/>
+          <path d="M94 129 L110 170 L126 129 Z" fill="#f4f1e8"/>
+          <path d="M94 129 L110 170 L126 129" stroke="#163a2b" stroke-width="2" fill="none"/>
+
+          <!-- pointing arm, reaching toward the board (left) holding a pointer stick -->
+          <g class="pointer-arm">
+            <path d="M74 154 L42 200 L10 174" stroke="#1f4d3a" stroke-width="23" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <line x1="6" y1="178" x2="-84" y2="94" stroke="#8a6a3b" stroke-width="4" stroke-linecap="round"/>
+            <circle cx="8" cy="172" r="11" fill="#f2c9a5"/>
+          </g>
+
+          <!-- head (original face drawing, scaled to fit the body) -->
+          <g class="head"><g transform="translate(48 8) scale(0.62)">
+            <circle cx="38" cy="106" r="10" fill="#e5b894"/>
+            <circle cx="162" cy="106" r="10" fill="#e5b894"/>
+            <circle cx="100" cy="100" r="62" fill="#f2c9a5"/>
+            <path d="M38 92 C38 36 162 36 162 92 C150 66 50 66 38 92 Z" fill="#2b2118"/>
+            <path d="M62 86 Q78 78 92 86" stroke="#2b2118" stroke-width="4" fill="none" stroke-linecap="round"/>
+            <path d="M108 86 Q122 78 138 86" stroke="#2b2118" stroke-width="4" fill="none" stroke-linecap="round"/>
+            <circle class="eye" cx="78" cy="102" r="6" fill="#2b2118"/>
+            <circle class="eye" cx="122" cy="102" r="6" fill="#2b2118"/>
+            <circle cx="78" cy="102" r="17" fill="none" stroke="#2b2118" stroke-width="3"/>
+            <circle cx="122" cy="102" r="17" fill="none" stroke="#2b2118" stroke-width="3"/>
+            <line x1="95" y1="102" x2="105" y2="102" stroke="#2b2118" stroke-width="3"/>
+            <path d="M100 110 Q95 124 103 126" stroke="#d3a47e" stroke-width="3" fill="none" stroke-linecap="round"/>
+            <ellipse id="mouth" cx="100" cy="140" rx="14" ry="3" fill="#8a3b2e"/>
+          </g></g>
+        </svg>
+      </div>
+
+      <!-- 5. CAPTIONS, like subtitles on a lesson video -->
+      <p class="subtitle" id="subtitle">
+        Different animals can all "make a sound", but each one does it in its own way.
+      </p>
+
+    </section>
+  </main>
+
+  <!-- ===== CONTROLS ===== -->
+  <footer class="controls">
+    <div class="control-row">
+      <button class="btn" id="btnPrev" type="button">&#9664; Back</button>
+      <button class="btn btn-primary" id="btnPlay" type="button">&#10074;&#10074; Pause</button>
+      <button class="btn" id="btnNext" type="button">Next &#9654;</button>
+      <button class="btn" id="btnRepeat" type="button">Repeat</button>
+      <button class="btn" id="btnMute" type="button">Mute</button>
+      <select class="btn" id="speedSelect" aria-label="Speaking speed">
+        <option value="0.75">0.75x</option>
+        <option value="1" selected>1x</option>
+        <option value="1.25">1.25x</option>
+        <option value="1.5">1.5x</option>
+      </select>
+    </div>
+
+    <!-- Ask the lecturer (text interaction; voice comes later) -->
+    <form class="ask-row" id="askForm">
+      <input
+        class="ask-input"
+        id="askInput"
+        type="text"
+        placeholder="Ask a question or say you don't understand..."
+        autocomplete="off">
+      <button class="btn btn-primary" type="submit">Ask</button>
+    </form>
+
+    <div class="quick-row">
+      <button class="chip" type="button" data-mode="simpler">Explain simpler</button>
+      <button class="chip" type="button" data-mode="example">Another example</button>
+      <button class="chip" type="button" data-mode="diagram">Show a diagram</button>
+      <button class="chip chip-quiz" id="btnQuiz" type="button">Quiz me</button>
+      <button class="chip chip-end" type="button">End lesson</button>
+    </div>
+  </footer>
+
+
+  <!-- ===== QUIZ PANEL (quiz.js fills it) ===== -->
+  <section class="quiz-panel" id="quizPanel" hidden aria-label="Quiz">
+    <div class="quiz-card">
+      <p class="quiz-count" id="quizCount"></p>
+      <h2 class="quiz-question" id="quizQuestion"></h2>
+      <div class="quiz-options" id="quizOptions"></div>
+      <div class="quiz-feedback" id="quizFeedback" hidden></div>
+      <div class="quiz-actions" id="quizActions"></div>
+    </div>
+  </section>
+
+  <script src="common.js"></script>
+  <script src="player.js"></script>
+  <script src="quiz.js"></script>
+</body>
+</html>
