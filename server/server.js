@@ -57,7 +57,7 @@ const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "cache");   // s
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "docs");      // uploaded documents
 
 // Change this word when the teaching prompt changes, so old saved lessons are not reused
-const PROMPT_VERSION = "v3";
+const PROMPT_VERSION = "v4";
 
 // Online use: a secret code that friends must type, and a daily limit per person,
 // so nobody can use up the free Gemini allowance. If ACCESS_CODE is empty (your own computer), the code is not asked.
@@ -160,10 +160,10 @@ const OUTLINE_SCHEMA = {
         type: "OBJECT",
         properties: {
           id:    { type: "INTEGER" },
-          level: { type: "INTEGER" },
+          kind:  { type: "STRING", enum: ["module", "unit", "topic", "merge"] },
           title: { type: "STRING" }
         },
-        required: ["id", "level", "title"]
+        required: ["id", "kind", "title"]
       }
     }
   },
@@ -200,7 +200,7 @@ Each segment has:
     "diagram": a simple tree. Fields: tag, heading, root (parent box), children (2 to 4 short labels), highlight (index of the child you are explaining, or -1).
     "list": steps or a recap. Fields: tag, heading, items (2 to 5 short lines).
 
-Start with a welcome and what we will learn. Finish with a recap.
+Open and close the lesson exactly as the LESSON POSITION RULES in the request say.
 Use the diagram "highlight" across consecutive segments so the board follows what you explain.
 Keep every board line short.
 `;
@@ -212,7 +212,7 @@ EXAM MODE (very important). This learner is preparing for an exam that rewards t
 - In "speech", introduce the idea briefly and then explain it in simple words. Do NOT repeat the quote inside "speech", because the quote is shown and read out separately.
 - Keep the order of the material. Cover EVERY definition, list, type, advantage, disadvantage, step and example in the material. Do not skip points.
 - The board "heading", "text" and "items" for document segments must use the material's exact wording as well.
-- Near the end, add a "list" segment titled "Key points to remember" that uses the material's exact wording.
+- Any goals or recap segment that comes from the document must use the material's exact wording too.
 `;
 
 function buildSystemInstruction(approach) {
@@ -231,16 +231,46 @@ function segmentRange(textLength, approach) {
   return "16 to 24";
 }
 
-function buildLessonPrompt(text, level, difficulty, approach, docName, sectionTitle) {
+// Tells the AI how to open and close THIS lesson. A unit is taught as several lessons in a row
+// (one per topic), so only the first one welcomes the learner and only the last one recaps.
+function positionRules(position) {
+  const first = position === "first" || position === "only";
+  const last = position === "last" || position === "only";
+  let r = "LESSON POSITION RULES (these override any other rule about openings and endings):\n";
+  if (first) {
+    r += '- Open with ONE short segment of 2 to 3 spoken lines that introduces what we are studying (use the INTRODUCTION text if it is given). Then ONE goals segment: board type "list", tag "Goals", heading "What you will learn", items = the learning goals this lesson covers. Use the LEARNING OUTCOMES text if it is given, keeping its wording and listing only the outcomes that match this lesson. If none are given, write 3 short goals yourself and mark the segment source "added".\n';
+  } else {
+    r += "- This lesson continues a unit that is already in progress. Do NOT welcome the learner and do NOT introduce the course again. Begin with one short sentence that names the new topic, then teach it.\n";
+  }
+  if (last) {
+    r += '- Finish with ONE recap segment: board type "list", tag "Recap", heading "Recap", 2 to 5 items. Base it on the SUMMARY text if it is given (use only the parts that relate to what was taught). If there is no summary, write the recap yourself and mark source "added".\n';
+  } else {
+    r += "- More topics follow this one. Do NOT end with a recap or a goodbye. Finish the topic and stop.\n";
+  }
+  return r;
+}
+
+function buildLessonPrompt(text, level, difficulty, approach, docName, sectionTitle, position, extras) {
+  position = position || "only";
+  extras = extras || {};
   let context = "";
   if (docName) context += "Document: " + docName + "\n";
-  if (sectionTitle) context += "Section being taught: " + sectionTitle + "\n";
+  if (sectionTitle) context += "Topic being taught: " + sectionTitle + "\n";
+
+  const first = position === "first" || position === "only";
+  const last = position === "last" || position === "only";
+  let extra = "";
+  if (first && extras.intro)    extra += 'INTRODUCTION text from the material:\n"""\n' + extras.intro + '\n"""\n\n';
+  if (first && extras.outcomes) extra += 'LEARNING OUTCOMES text from the material:\n"""\n' + extras.outcomes + '\n"""\n\n';
+  if (last && extras.summary)   extra += 'SUMMARY text from the material:\n"""\n' + extras.summary + '\n"""\n\n';
+
   return `
 Learner's educational level: ${level}
 Teaching difficulty: ${difficulty}
-${context}Number of segments for this lesson: ${segmentRange(text.length, approach)}
+${context}Number of teaching segments for the topic itself: ${segmentRange(text.length, approach)} (the opening, goals and recap segments described below are extra)
 
-Study material:
+${positionRules(position)}
+${extra}Study material for the topic:
 """
 ${text}
 """
@@ -248,10 +278,16 @@ ${text}
 }
 
 const OUTLINE_PROMPT = `
-You organise a course document into a clickable table of contents.
+You organise a course document into a clean table of contents: Module, then Unit, then main teaching topics.
 You receive a numbered list of lines that MAY be headings, each written as: id | page | text.
-Pick only the lines that are real headings of the document's structure (modules, units, chapters, numbered sections such as 3.1). Ignore running page headers and footers, figure captions, table rows, list items and ordinary sentences.
-Give each chosen heading a level: 1 = top level (for example a module or chapter), 2 = the next level inside it (for example a unit), 3 = sections inside that. Use fewer levels if the document has fewer. The first item must be level 1, and a level can only be one deeper than the item before it.
+For each line you want to keep, give its kind:
+- "module": a top-level block that contains several units (for example "MODULE 1: ...").
+- "unit": a unit or chapter inside a module (for example "Unit 2: Coulomb's Law ...").
+- "topic": a MAIN teaching topic inside a unit. Usually a numbered section such as "1.2 Electric Charge and Their Properties". Only the main topics, one per concept the learner must study.
+- "merge": a real heading that is only a detail of the topic above it (a sub-sub-heading such as 1.2.1, a worked example, a formula, a "Case study", a figure caption). These will be folded into the topic above.
+Leave out (do not return) anything that is not a heading: running page headers and footers, table rows, list items, ordinary sentences.
+If the document has no modules, use only "unit" and "topic". If it has only chapters, use "unit" for chapters and "topic" for their sections.
+A contents page at the start may list the same headings again. Return them as they appear; duplicates are removed later.
 Keep the ids in their original order. Keep titles as written but tidy (no page numbers, at most 90 characters).
 Also return courseTitle: the course or document title if you can see it, otherwise an empty string.
 `;
@@ -668,28 +704,57 @@ function findHeadingCandidates(text, pageStarts) {
   return candidates;
 }
 
-// Used if Gemini is too busy: guess levels from the words in the heading
-function guessLevel(line) {
-  if (/^module\b/i.test(line)) return 1;
-  if (/^(unit|chapter|lesson|part)\b/i.test(line)) return 2;
-  if (/^\d/.test(line)) return 3;
-  return 2;
+/* ---------------------------------------------------------
+   KINDS OF HEADINGS
+   Structural (shown in the list):  module > unit > topic
+   Special (never shown in the list, but used while teaching):
+     intro       -> becomes the 2-3 opening lines of a lesson
+     outcomes    -> shown as the goals, and decides what the quiz covers
+     summary     -> becomes the recap at the end of a lesson
+     exercise    -> self-assessment questions and solutions: source material for quizzes
+     references  -> ignored
+   "merge" = a detail (formula, worked example, sub-sub-heading): folded into the topic above.
+   --------------------------------------------------------- */
+const KIND_LEVEL = { module: 1, unit: 2, topic: 3 };
+
+function isStructural(item) { return KIND_LEVEL[item.kind] !== undefined; }
+
+function stripNumbering(line) {
+  return line.replace(/^\s*\d+(\.\d+)*\.?\s+/, "").trim();
 }
 
-// Make a clean list of {offset, title, level, page} with sane levels
-function normaliseItems(rawItems) {
-  if (!rawItems.length) return [];
-  const minLevel = Math.min.apply(null, rawItems.map(function (i) { return i.level; }));
-  let previous = 0;
-  return rawItems.map(function (i) {
-    let level = Math.max(1, i.level - (minLevel - 1));
-    if (level > previous + 1) level = previous + 1;      // a level can only go one deeper
-    previous = level;
-    return { offset: i.offset, title: i.title, level: level, page: i.page };
-  });
+// Decides by the WORDS of a heading (no AI needed). Returns a special kind, "merge", or null.
+function kindByRules(line) {
+  const t = line.trim();
+  // "Unit 3 ..." and "Module 2 ..." are always real structure
+  if (new RegExp("^(module|unit|chapter)\\s+(\\d+|[ivx]+|" + NUMBER_WORDS + ")\\b", "i").test(t)) return null;
+  const s = stripNumbering(t);
+
+  if (/^(references?|further reading|web resources|bibliography|suggested reading|recommended reading)\b/i.test(s)) return "references";
+  if (/(self[-\s]?assessment|tutor[-\s]?marked|assessment exercise|\bexercises?\b|\bassignments?\b|practice questions?|review questions?)/i.test(s)) return "exercise";
+  if (/^(solutions?|answers?|model answers?)\b/i.test(s)) return "exercise";
+  if (/^(intended\s+|learning\s+|unit\s+)?(learning\s+)?(outcomes?|objectives?)\b/i.test(s)) return "outcomes";
+  if (/^(summary|conclusion|let us sum up|recap|chapter summary|unit summary)\b/i.test(s)) return "summary";
+  if (/^(introduction|overview|preamble|preface)$/i.test(s)) return "intro";
+  // formulas ("C = C1 + C2") and worked examples
+  if (t.includes("=") || /^(worked\s+|solved\s+)?(example|illustration|formula|equation|proof|theorem|remark|note)\b/i.test(s)) return "merge";
+  return null;
 }
 
-// If there are no headings at all, cut the text into equal parts
+// Used if Gemini is too busy: guess the kind from the words in the heading
+function guessKind(line) {
+  if (/^(module|part)\b/i.test(line)) return "module";
+  if (/^(unit|chapter|lesson)\b/i.test(line)) return "unit";
+  if (/^\d{1,2}\.\d{1,2}\.\d/.test(line)) return "merge";                 // 1.2.3 = a detail
+  if (/^\d{1,2}\.\d{1,2}\b/.test(line)) return "topic";                   // 1.2 = a main topic
+  const letters = line.replace(/[^A-Za-z]/g, "");
+  if (letters.length >= 4 && letters === letters.toUpperCase()) return "merge";   // other ALL CAPS lines
+  return "topic";
+}
+
+function normKey(title) { return String(title).toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
+// If there are no headings at all, cut the text into equal parts (each becomes a topic)
 function chunkOutline(text, pageStarts) {
   const pieces = splitSection(text.trim(), 8000);
   let offset = 0;
@@ -701,7 +766,7 @@ function chunkOutline(text, pageStarts) {
     items.push({
       offset: at,
       title: "Part " + (i + 1) + ": " + firstLine.trim().slice(0, 50),
-      level: 1,
+      kind: "topic",
       page: pageOfOffset(pageStarts, at)
     });
   });
@@ -713,98 +778,218 @@ async function buildOutline(text, pageStarts, docName) {
   console.log("Heading candidates found: " + candidates.length);
 
   if (candidates.length < 2) {
-    return { items: chunkOutline(text, pageStarts), courseTitle: "", source: "equal parts (no headings found)" };
+    return { items: buildItems(chunkOutline(text, pageStarts), text), courseTitle: "", source: "equal parts (no headings found)" };
   }
 
-  // Step B: ask Gemini to pick the real headings
+  // Step 1 (free): sort out the "special" headings and the details by their words
+  const forced = [];       // special headings: kept with their kind, never shown in the list
+  const toJudge = [];      // the rest: module / unit / topic ?
+  candidates.forEach(function (c) {
+    const rule = kindByRules(c.line);
+    if (rule === "merge") return;                               // folded into the topic above
+    if (rule) forced.push({ offset: c.offset, title: c.line.slice(0, 90), kind: rule, page: c.page });
+    else toJudge.push(c);
+  });
+
+  // Step 2: ask Gemini which of the rest are modules, units, topics
+  let structural = null;
+  let courseTitle = "";
+  let source = "AI";
   try {
-    const listing = candidates.map(function (c) { return c.id + " | " + c.page + " | " + c.line; }).join("\n");
-    const out = await runWithFallback({
-      systemText: OUTLINE_PROMPT,
-      parts: [{ text: "Document: " + docName + "\n\nCandidate lines:\n" + listing }],
-      schema: OUTLINE_SCHEMA,
-      temperature: 0
-    });
-
-    const byId = {};
-    candidates.forEach(function (c) { byId[c.id] = c; });
-
-    const picked = [];
-    let lastOffset = -1;
-    (out.result.items || []).forEach(function (item) {
-      const c = byId[item.id];
-      if (!c || c.offset <= lastOffset) return;           // unknown id or out of order: skip
-      lastOffset = c.offset;
-      picked.push({
-        offset: c.offset,
-        title: String(item.title || c.line).trim().slice(0, 90),
-        level: Math.min(3, Math.max(1, Number(item.level) || 1)),
-        page: c.page
+    if (toJudge.length >= 2) {
+      const listing = toJudge.map(function (c) { return c.id + " | " + c.page + " | " + c.line; }).join("\n");
+      const out = await runWithFallback({
+        systemText: OUTLINE_PROMPT,
+        parts: [{ text: "Document: " + docName + "\n\nCandidate lines:\n" + listing }],
+        schema: OUTLINE_SCHEMA,
+        temperature: 0
       });
-    });
-
-    if (picked.length >= 2) {
-      return { items: normaliseItems(picked), courseTitle: String(out.result.courseTitle || "").trim(), source: "AI" };
+      const byId = {};
+      toJudge.forEach(function (c) { byId[c.id] = c; });
+      const picked = [];
+      let lastOffset = -1;
+      (out.result.items || []).forEach(function (item) {
+        const c = byId[item.id];
+        if (!c || c.offset <= lastOffset) return;               // unknown id or out of order: skip
+        lastOffset = c.offset;
+        if (item.kind === "merge") return;
+        const kind = KIND_LEVEL[item.kind] ? item.kind : "topic";
+        picked.push({ offset: c.offset, title: String(item.title || c.line).trim().slice(0, 90), kind: kind, page: c.page });
+      });
+      if (picked.length >= 2) {
+        structural = picked;
+        courseTitle = String(out.result.courseTitle || "").trim();
+      } else {
+        console.log("AI outline was too small, using the automatic one.");
+      }
     }
-    console.log("AI outline was too small, using the automatic one.");
   } catch (error) {
     console.error("Outline from Gemini failed (" + describe(error) + "). Using the automatic outline.");
   }
 
-  // Fallback: guess from the heading words
-  const guessed = candidates.map(function (c) {
-    return { offset: c.offset, title: c.line.slice(0, 90), level: guessLevel(c.line), page: c.page };
-  });
-  return { items: normaliseItems(guessed), courseTitle: "", source: "automatic (guessed from the headings)" };
+  if (!structural) {
+    source = "automatic (guessed from the headings)";
+    structural = [];
+    toJudge.forEach(function (c) {
+      const kind = guessKind(c.line);
+      if (kind !== "merge") structural.push({ offset: c.offset, title: c.line.slice(0, 90), kind: kind, page: c.page });
+    });
+  }
+
+  const items = buildItems(structural.concat(forced), text);
+  if (items.length === 0) {
+    return { items: buildItems(chunkOutline(text, pageStarts), text), courseTitle: "", source: "equal parts (no headings found)" };
+  }
+  return { items: items, courseTitle: courseTitle, source: source };
 }
 
-// Step C: give every item its slice of text, then nest them into a tree
-function sliceItems(items, text) {
-  return items.map(function (item, i) {
-    // "end" = where the NEXT heading (of any level) starts: this is the item's own text
-    const end = i + 1 < items.length ? items[i + 1].offset : text.length;
-    const sectionText = text.slice(item.offset, end).trim();
+// Turns raw headings [{offset, title, kind, page}] into final items with text ranges.
+//  1. removes headings that only repeat a contents page,
+//  2. folds tiny topics into the topic before them,
+//  3. gives every module/unit/topic its level, and cuts the text.
+function buildItems(raw, text) {
+  const seen = new Set();
+  let items = raw.slice().sort(function (a, b) { return a.offset - b.offset; })
+    .filter(function (i) { if (seen.has(i.offset)) return false; seen.add(i.offset); return true; });
 
-    // "rangeEnd" = where the next heading of the SAME OR HIGHER level starts:
-    // this covers the item AND everything inside it (the whole unit)
-    let rangeEnd = text.length;
-    for (let j = i + 1; j < items.length; j++) {
-      if (items[j].level <= item.level) { rangeEnd = items[j].offset; break; }
+  function ownLength(list, idx) {
+    const end = idx + 1 < list.length ? list[idx + 1].offset : text.length;
+    return text.slice(list[idx].offset, end).trim().length;
+  }
+
+  // 1. A contents page lists headings with almost no text under them. If the same heading
+  //    appears again later, the early one is the contents-page copy: drop it.
+  const before = items;
+  items = before.filter(function (item, idx) {
+    if (ownLength(before, idx) >= 150) return true;
+    const key = normKey(item.title);
+    for (let j = idx + 1; j < before.length; j++) {
+      if (normKey(before[j].title) === key) return false;
+    }
+    return true;
+  });
+
+  // 2. A topic with almost no text is not worth teaching on its own: its text joins the item before it
+  const before2 = items;
+  items = before2.filter(function (item, idx) {
+    return !(item.kind === "topic" && ownLength(before2, idx) < 150);
+  });
+
+  // 3. Levels: module 1, unit 2, topic 3, then shifted up if a document has no modules.
+  //    A level can only be one deeper than the one before it.
+  const structural = items.filter(isStructural);
+  if (structural.length === 0) return [];
+  const minLevel = Math.min.apply(null, structural.map(function (i) { return KIND_LEVEL[i.kind]; }));
+  let previous = 0;
+  structural.forEach(function (i) {
+    let level = Math.max(1, KIND_LEVEL[i.kind] - (minLevel - 1));
+    if (level > previous + 1) level = previous + 1;
+    previous = level;
+    i.level = level;
+  });
+  items.forEach(function (i) { if (!isStructural(i)) i.level = 99; });
+
+  return sliceItems(items, text);
+}
+
+// Gives every item its slice of text
+function sliceItems(items, text) {
+  const maxLevel = Math.max.apply(null, items.filter(isStructural).map(function (i) { return i.level; }).concat([1]));
+  const unitLevel = Math.max(1, maxLevel - 1);        // the level of "units" (the parents of topics)
+
+  const out = items.map(function (item, i) {
+    // "end" = where the NEXT heading of any kind starts: this is the item's own text
+    const end = i + 1 < items.length ? items[i + 1].offset : text.length;
+    const ownText = text.slice(item.offset, end).trim();
+
+    // "rangeEnd" = where the next module/unit/topic of the same or higher level starts
+    let rangeEnd = end;
+    let hasChildren = false;
+    if (isStructural(item)) {
+      rangeEnd = text.length;
+      for (let j = i + 1; j < items.length; j++) {
+        if (!isStructural(items[j])) continue;
+        if (items[j].level <= item.level) { rangeEnd = items[j].offset; break; }
+      }
+      // the first structural item after this one decides if it has children
+      const nextStructural = items.slice(i + 1).find(isStructural);
+      hasChildren = Boolean(nextStructural && nextStructural.level > item.level);
     }
     const rangeText = text.slice(item.offset, rangeEnd).trim();
+
+    // What a lesson on this item teaches: a topic = its own text; a unit without topics = everything in it
+    const teachEnd = (item.kind === "topic" || !isStructural(item)) ? end : rangeEnd;
+    const teachText = text.slice(item.offset, teachEnd).trim();
 
     return {
       id: "s" + (i + 1),
       title: item.title,
+      kind: item.kind,
       level: item.level,
       page: item.page,
       start: item.offset,
       end: end,
-      chars: sectionText.length,
-      parts: splitSection(sectionText).length,
-      teachable: sectionText.length >= 150,
+      chars: ownText.length,
       rangeEnd: rangeEnd,
       rangeChars: rangeText.length,
-      rangeParts: splitSection(rangeText).length
+      hasChildren: hasChildren,
+      teachEnd: teachEnd,
+      teachChars: teachText.length,
+      teachParts: splitSection(teachText).length,
+      teachable: teachText.length >= 150,
+      ownerId: null
     };
   });
+
+  // Owners: a topic belongs to its unit; a special heading (introduction, summary ...) belongs to the unit it sits in
+  out.forEach(function (item, i) {
+    for (let j = i - 1; j >= 0; j--) {
+      if (!isStructural(out[j])) continue;
+      if (isStructural(item) ? out[j].level < item.level : out[j].level <= unitLevel) { item.ownerId = out[j].id; break; }
+    }
+  });
+  return out;
 }
 
+// Builds the tree the contents page draws. Only modules, units and topics appear.
+// Branches with nothing teachable inside are left out.
 function nestItems(flat) {
   const root = [];
   const stack = [];
-  flat.forEach(function (item) {
+  flat.filter(isStructural).forEach(function (item) {
     const node = {
       id: item.id, title: item.title, page: item.page,
-      chars: item.chars, parts: item.parts, teachable: item.teachable,
-      rangeChars: item.rangeChars, rangeParts: item.rangeParts,   // the whole unit, including its sections
+      teachable: item.teachable, parts: item.teachParts, chars: item.teachChars,
       children: []
     };
     while (stack.length && stack[stack.length - 1].level >= item.level) stack.pop();
     if (stack.length) stack[stack.length - 1].node.children.push(node); else root.push(node);
     stack.push({ level: item.level, node: node });
   });
-  return root;
+
+  function prune(nodes) {
+    return nodes.filter(function (n) {
+      n.children = prune(n.children);
+      return n.children.length > 0 || n.teachable;
+    });
+  }
+  return prune(root);
+}
+
+// The text a lesson on this item teaches (scope "all" = the whole range, older behaviour)
+function lessonSlice(doc, item, scope) {
+  const end = scope === "all" ? item.rangeEnd : (item.teachEnd || item.end);
+  return doc.text.slice(item.start, end).trim();
+}
+
+// Text of the special headings (introduction, outcomes, summary, exercises) that belong to an item's unit.
+// The heading line itself is removed.
+function specialText(doc, ownerId, kind, maxChars) {
+  const pieces = doc.items
+    .filter(function (i) { return i.kind === kind && i.ownerId === ownerId; })
+    .map(function (i) { return doc.text.slice(i.start, i.end).split("\n").slice(1).join("\n").trim(); })
+    .filter(Boolean);
+  return pieces.join("\n\n").slice(0, maxChars);
 }
 
 
@@ -816,9 +1001,26 @@ function saveDoc(doc) {
   fs.writeFileSync(path.join(DOCS_DIR, doc.id + ".json"), JSON.stringify(doc));
 }
 
+// Documents saved by an older version of this server have no "kind" on their headings.
+// Rebuild their structure once, from the saved text, with no Gemini request.
+function upgradeDoc(doc) {
+  if (!doc || doc.version === 2 || !Array.isArray(doc.items)) return doc;
+  const raw = doc.items.map(function (i) {
+    let kind = kindByRules(i.title);
+    if (!kind) kind = i.level <= 1 ? "module" : i.level === 2 ? "unit" : "topic";
+    return { offset: i.start, title: i.title, page: i.page, kind: kind };
+  }).filter(function (i) { return i.kind !== "merge"; });
+  let items = buildItems(raw, doc.text);
+  if (items.length === 0) items = buildItems(chunkOutline(doc.text, [0]), doc.text);
+  doc.items = items;
+  doc.version = 2;
+  try { saveDoc(doc); } catch (e) { /* not saving is fine, it will be rebuilt next time */ }
+  return doc;
+}
+
 function loadDoc(id) {
   if (!/^[a-f0-9]{12}$/.test(String(id))) return null;     // blocks tricks like "../../secret"
-  try { return JSON.parse(fs.readFileSync(path.join(DOCS_DIR, id + ".json"), "utf8")); } catch (e) { return null; }
+  try { return upgradeDoc(JSON.parse(fs.readFileSync(path.join(DOCS_DIR, id + ".json"), "utf8"))); } catch (e) { return null; }
 }
 
 function docSummary(doc) {
@@ -946,7 +1148,7 @@ app.post("/api/upload", async function (req, res) {
     }
 
     const built = await buildOutline(joined.text, joined.pageStarts, docName);
-    const items = sliceItems(built.items, joined.text);
+    const items = built.items;
 
     const doc = {
       id: crypto.randomBytes(6).toString("hex"),
@@ -956,6 +1158,7 @@ app.post("/api/upload", async function (req, res) {
       chars: joined.text.length,
       outlineSource: built.source,
       createdAt: new Date().toISOString(),
+      version: 2,
       text: joined.text,
       items: items
     };
@@ -970,8 +1173,21 @@ app.post("/api/upload", async function (req, res) {
 });
 
 // Get the outline of a document that was uploaded earlier
+// Which of these document ids still exist on the server? (each browser keeps its own list of ids)
+app.post("/api/docs/status", function (req, res) {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids.slice(0, 50) : [];
+  const docs = [];
+  ids.forEach(function (id) {
+    const doc = loadDoc(id);
+    if (doc) docs.push({ docId: doc.id, name: doc.name, courseTitle: doc.courseTitle, pages: doc.pages });
+  });
+  res.json({ docs: docs });
+});
+
 // List of everything uploaded before, newest first (for the "Your saved material" card)
 app.get("/api/docs", function (req, res) {
+  // When the site is shared (an access code is set), nobody may list everybody's uploads
+  if (ACCESS_CODE) return res.status(403).json({ error: "Not available on a shared server." });
   let files = [];
   try { files = fs.readdirSync(DOCS_DIR).filter(function (f) { return /^[a-f0-9]{12}\.json$/.test(f); }); } catch (e) { files = []; }
 
@@ -997,34 +1213,43 @@ app.post("/api/lesson", async function (req, res) {
   const level = String(req.body.level || "University");
   const difficulty = String(req.body.difficulty || "Standard");
   const approach = req.body.approach === "exam" ? "exam" : "explain";
+  // A unit is taught as a chain of topic lessons: "first", "middle", "last" (or "only" for a single lesson)
+  const position = ["first", "middle", "last"].includes(req.body.position) ? req.body.position : "only";
 
   let sourceText = "";
   let docName = "";
   let sectionTitle = "";
+  let extras = {};
   let meta = {};
 
   if (req.body.docId) {
-    // ---- one section of an uploaded document ----
+    // ---- one topic of an uploaded document ----
     const doc = loadDoc(req.body.docId);
     if (!doc) return res.status(404).json({ error: "That document was not found. Upload it again." });
     const item = doc.items.find(function (i) { return i.id === req.body.sectionId; });
-    if (!item) return res.status(404).json({ error: "That section was not found." });
+    if (!item) return res.status(404).json({ error: "That topic was not found." });
 
-    // scope "all" = the whole unit (this heading and everything inside it); otherwise only its own text
-    const wholeUnit = req.body.scope === "all";
-    const sectionText = doc.text.slice(item.start, wholeUnit ? item.rangeEnd : item.end).trim();
+    const sectionText = lessonSlice(doc, item, req.body.scope);
     const pieces = splitSection(sectionText);
     const partIndex = Math.min(Math.max(Number(req.body.part) || 0, 0), pieces.length - 1);
     sourceText = pieces[partIndex];
     docName = doc.courseTitle || doc.name;
     sectionTitle = item.title + (pieces.length > 1 ? " (part " + (partIndex + 1) + " of " + pieces.length + ")" : "");
     meta = {
-      docId: doc.id, sectionId: item.id, scope: wholeUnit ? "all" : "own",
-      part: partIndex, partCount: pieces.length, sectionTitle: sectionTitle, docName: docName
+      docId: doc.id, sectionId: item.id, scope: req.body.scope === "all" ? "all" : "own",
+      part: partIndex, partCount: pieces.length, sectionTitle: sectionTitle, docName: docName, position: position
+    };
+
+    // The unit's introduction, learning outcomes and summary (never listed, but used for the opening, goals and recap)
+    const owner = item.ownerId;
+    extras = {
+      intro:    specialText(doc, owner, "intro", 1500),
+      outcomes: specialText(doc, owner, "outcomes", 1800),
+      summary:  specialText(doc, owner, "summary", 2500)
     };
 
     if (sourceText.length < 80) {
-      return res.status(400).json({ error: "This heading has almost no text under it. Pick the section below it." });
+      return res.status(400).json({ error: "This topic has almost no text under it. Pick another one." });
     }
   } else {
     // ---- pasted text ----
@@ -1037,8 +1262,9 @@ app.post("/api/lesson", async function (req, res) {
     }
   }
 
-  // Already made this exact lesson? Reuse it for free.
-  const key = cacheKey([level, difficulty, approach, sectionTitle, sourceText]);
+  // Already made this exact lesson (by anyone)? Reuse it for free.
+  const extrasText = [extras.intro, extras.outcomes, extras.summary].join("|");
+  const key = cacheKey([level, difficulty, approach, sectionTitle, position, sourceText, extrasText]);
   const saved = readCache(key);
   if (saved) {
     console.log("Served from the saved lessons (no Gemini request used).");
@@ -1048,17 +1274,18 @@ app.post("/api/lesson", async function (req, res) {
   try {
     const out = await runWithFallback({
       systemText: buildSystemInstruction(approach),
-      parts: [{ text: buildLessonPrompt(sourceText, level, difficulty, approach, docName, sectionTitle) }],
+      parts: [{ text: buildLessonPrompt(sourceText, level, difficulty, approach, docName, sectionTitle, position, extras) }],
       schema: LESSON_SCHEMA,
       temperature: 0.6
     });
 
-    const lesson = cleanLesson(out.result, sourceText);
+    // Quotes may come from the topic text or from the unit's outcomes / summary text
+    const lesson = cleanLesson(out.result, sourceText + "\n" + (extras.intro || "") + "\n" + (extras.outcomes || "") + "\n" + (extras.summary || ""));
     if (sectionTitle) lesson.title = sectionTitle;
     lesson.approach = approach;
     writeCache(key, lesson);
 
-    console.log("Lesson ready from " + out.model + " (" + lesson.segments.length + " segments). Exact quotes: " +
+    console.log("Lesson ready from " + out.model + " (" + lesson.segments.length + " segments, position " + position + "). Exact quotes: " +
       lesson.exactQuotes.verified + " verified, " + lesson.exactQuotes.removed + " removed (not found word for word).");
 
     res.json(Object.assign({}, lesson, meta, { model: out.model, cached: false }));
@@ -1125,8 +1352,7 @@ app.post("/api/ask", async function (req, res) {
     const doc = loadDoc(req.body.docId);
     const item = doc && doc.items.find(function (i) { return i.id === req.body.sectionId; });
     if (item) {
-      const wholeUnit = req.body.scope === "all";
-      const pieces = splitSection(doc.text.slice(item.start, wholeUnit ? item.rangeEnd : item.end).trim());
+      const pieces = splitSection(lessonSlice(doc, item, req.body.scope));
       const partIndex = Math.min(Math.max(Number(req.body.part) || 0, 0), pieces.length - 1);
       sourceText = pieces[partIndex];
     }
@@ -1247,20 +1473,38 @@ app.post("/api/quiz", async function (req, res) {
 
   // Best source: the real course text. Otherwise what the lecturer taught.
   let sourceText = "";
+  let outcomesText = "";    // what the unit says the learner should achieve: the quiz must cover these
+  let practiceText = "";    // self-assessment questions and solutions: the AI may use them as source material
   if (req.body.docId) {
     const doc = loadDoc(req.body.docId);
-    const item = doc && doc.items.find(function (i) { return i.id === req.body.sectionId; });
-    if (item) {
-      const wholeUnit = req.body.scope === "all";
-      const pieces = splitSection(doc.text.slice(item.start, wholeUnit ? item.rangeEnd : item.end).trim());
-      sourceText = pieces[Math.min(Math.max(Number(req.body.part) || 0, 0), pieces.length - 1)];
+    // "sections" = every topic taught so far in this lesson (a unit is several topics in a row)
+    const refs = Array.isArray(req.body.sections) && req.body.sections.length
+      ? req.body.sections.slice(0, 40)
+      : [{ sectionId: req.body.sectionId, part: req.body.part, scope: req.body.scope }];
+    const pieces = [];
+    let firstItem = null;
+    if (doc) {
+      refs.forEach(function (ref) {
+        const item = doc.items.find(function (i) { return i.id === ref.sectionId; });
+        if (!item) return;
+        if (!firstItem) firstItem = item;
+        const parts = splitSection(lessonSlice(doc, item, ref.scope));
+        pieces.push(parts[Math.min(Math.max(Number(ref.part) || 0, 0), parts.length - 1)]);
+      });
+      // share the room fairly between the topics
+      const each = Math.floor(12000 / Math.max(1, pieces.length));
+      sourceText = pieces.map(function (p) { return p.slice(0, each); }).join("\n\n");
+      if (firstItem) {
+        outcomesText = specialText(doc, firstItem.ownerId, "outcomes", 1500);
+        practiceText = specialText(doc, firstItem.ownerId, "exercise", 3500);
+      }
     }
   }
   if (!sourceText) sourceText = String(req.body.lessonText || "").slice(0, 12000);
   if (sourceText.length < 80) return res.status(400).json({ error: "There is not enough lesson text to make a quiz from." });
 
   const count = sourceText.length < 1500 ? 4 : sourceText.length < 5000 ? 6 : 8;
-  const key = cacheKey(["quiz", level, difficulty, approach, String(round), lessonTitle, sourceText]);
+  const key = cacheKey(["quiz", level, difficulty, approach, String(round), lessonTitle, sourceText, outcomesText, practiceText]);
   const saved = readCache(key);
   if (saved) return res.json(Object.assign({}, saved, { cached: true }));
 
@@ -1268,6 +1512,8 @@ app.post("/api/quiz", async function (req, res) {
     "Learner level: " + level + "\nDifficulty: " + difficulty + "\nLesson: " + lessonTitle + "\n" +
     "Write " + count + " questions." + (round > 0 ? " This is attempt " + (round + 1) + ": ask DIFFERENT questions from a typical first quiz, covering other details." : "") +
     (approach === "exam" ? " Exam style: prefer questions on exact definitions, terms and lists in the material." : "") +
+    (outcomesText ? '\n\nLearning outcomes of this unit (the quiz must cover them):\n"""\n' + outcomesText + '\n"""' : "") +
+    (practiceText ? '\n\nPractice questions and solutions from the material (use them as extra source material; adapt them, do not copy them blindly):\n"""\n' + practiceText + '\n"""' : "") +
     '\n\nStudy material:\n"""\n' + sourceText + '\n"""';
 
   try {
