@@ -59,6 +59,17 @@ function offerQuiz() {
 }
 
 
+/* ---------- which topics have been taught so far ---------- */
+function taughtSections() {
+  if (playlist) {
+    return playlist.entries.slice(0, playlist.index + 1).map(function (entry) {
+      return { sectionId: entry.sectionId, part: entry.part };
+    });
+  }
+  return lesson.sectionId ? [{ sectionId: lesson.sectionId, part: lesson.part || 0, scope: lesson.scope || "own" }] : [];
+}
+
+
 /* ---------- 1. get the questions ---------- */
 async function startQuiz(round) {
   if (!lesson || quizBusy) return;
@@ -85,12 +96,11 @@ async function startQuiz(round) {
 
   try {
     const data = await postJson("/api/quiz", {
-      lessonTitle: lesson.title,
+      lessonTitle: playlist && playlist.label ? playlist.label : lesson.title,
       lessonText: taught,
       docId: lesson.docId || "",
-      sectionId: lesson.sectionId || "",
-      scope: lesson.scope || "own",
-      part: lesson.part || 0,
+      // every topic taught so far (a unit is several topics), so the quiz covers what was just taught
+      sections: taughtSections(),
       level: prefs.level,
       difficulty: prefs.difficulty,
       approach: prefs.approach,

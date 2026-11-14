@@ -127,3 +127,62 @@ function startWaitTimer(show, label) {
   }, 1000);
   return function stop() { clearInterval(timer); };
 }
+
+
+/* =========================================================
+   MY DOCUMENTS and DONE MARKERS (kept in THIS browser only)
+   - myDocs: the documents this browser uploaded. The home page lists only these,
+     so a friend using the same server never sees your material.
+   - done markers: which topics you have already generated a lesson for,
+     so the contents page can show them dimmed.
+   ========================================================= */
+const MY_DOCS_KEY = "myDocs";
+
+function getMyDocIds() {
+  try { return JSON.parse(localStorage.getItem(MY_DOCS_KEY) || "[]"); } catch (error) { return []; }
+}
+
+function rememberDoc(docId) {
+  try {
+    const ids = getMyDocIds().filter(function (id) { return id !== docId; });
+    ids.unshift(docId);                                    // newest first
+    localStorage.setItem(MY_DOCS_KEY, JSON.stringify(ids.slice(0, 50)));
+  } catch (error) { /* not saving is fine */ }
+}
+
+function doneKey(docId) { return "lecturerDone:" + docId; }
+
+function getDone(docId) {
+  try { return JSON.parse(localStorage.getItem(doneKey(docId)) || "[]"); } catch (error) { return []; }
+}
+
+function markDone(docId, sectionId) {
+  try {
+    const done = getDone(docId);
+    if (!done.includes(sectionId)) {
+      done.push(sectionId);
+      localStorage.setItem(doneKey(docId), JSON.stringify(done));
+    }
+  } catch (error) { /* not saving is fine */ }
+}
+
+/* =========================================================
+   ASKING FOR ONE TOPIC'S LESSON
+   entry    = { sectionId, part, title }
+   position = "only" | "first" | "middle" | "last"  (a unit is several topic lessons in a row)
+   prefs    = { level, difficulty, approach }
+   ========================================================= */
+async function fetchTopicLesson(docId, entry, position, prefs) {
+  const lesson = await postJson("/api/lesson", {
+    docId: docId,
+    sectionId: entry.sectionId,
+    scope: "own",
+    part: entry.part,
+    position: position,
+    level: prefs.level,
+    difficulty: prefs.difficulty,
+    approach: prefs.approach
+  });
+  markDone(docId, entry.sectionId);
+  return lesson;
+}

@@ -37,6 +37,51 @@ const statusEl        = document.getElementById("lecturerStatus");
 const speakingDotEl   = document.getElementById("speakingDot");
 const mouthEl         = document.getElementById("mouth");
 
+// ----- Lecturer portrait (photo tile) -----
+// Four photos of the same person. While he speaks we swap between them quickly,
+// and every few seconds we show the "eyes closed" photo for a moment (a blink).
+const faceImgEl = document.getElementById("faceImg");
+const stageEl   = document.querySelector(".stage");
+const FACES = {
+  closed: "images/lecturer-closed.webp",
+  half:   "images/lecturer-half.webp",
+  wide:   "images/lecturer-wide.webp",
+  blink:  "images/lecturer-blink.webp"
+};
+let currentFace = "closed";
+let blinking = false;
+
+// Load all four photos now so swapping later is instant (no flicker)
+Object.keys(FACES).forEach(function (name) { new Image().src = FACES[name]; });
+
+// If the photo cannot load, show the drawn teacher instead
+if (faceImgEl) {
+  faceImgEl.addEventListener("error", function () { stageEl.classList.add("no-photo"); });
+  // the error may already have happened before this line ran
+  if (faceImgEl.complete && faceImgEl.naturalWidth === 0) stageEl.classList.add("no-photo");
+}
+
+function setFace(name) {
+  currentFace = name;
+  if (faceImgEl && !blinking) faceImgEl.src = FACES[name];
+}
+
+// Blink at random moments, 2.5 to 5.5 seconds apart
+function scheduleBlink() {
+  setTimeout(function () {
+    if (faceImgEl) {
+      blinking = true;
+      faceImgEl.src = FACES.blink;
+      setTimeout(function () {
+        blinking = false;
+        faceImgEl.src = FACES[currentFace];
+      }, 150);
+    }
+    scheduleBlink();
+  }, 2500 + Math.random() * 3000);
+}
+scheduleBlink();
+
 const btnPlay     = document.getElementById("btnPlay");
 const btnPrev     = document.getElementById("btnPrev");
 const btnNext     = document.getElementById("btnNext");
@@ -99,6 +144,8 @@ async function loadLesson() {
       lesson = await response.json();
     }
 
+    playlist = lesson.playlist || null;     // set by the contents page: the topics of a unit, in order
+    tagSegments(lesson.segments, 0, lesson.sectionTitle || lesson.title, lesson);
     lessonTitleEl.textContent = lesson.title;
     if (lesson.docName) topbarLabelEl.textContent = lesson.docName;
 
@@ -261,10 +308,13 @@ function setSpeaking(isSpeaking) {
     mouthTimer = setInterval(function () {
       const opening = 3 + Math.random() * 9;       // between 3 (closed) and 12 (wide)
       mouthEl.setAttribute("ry", opening.toFixed(1));
+      // Same random amount drives the photo: mostly closed/half open, sometimes wide
+      setFace(opening < 6 ? "closed" : opening < 10.5 ? "half" : "wide");
     }, 120);
   } else {
     clearInterval(mouthTimer);
     mouthEl.setAttribute("ry", "3");
+    setFace("closed");
     statusEl.textContent = isPlaying ? "Teaching" : "Paused";
   }
 }
@@ -415,8 +465,23 @@ function showSegment(index, shouldSpeak) {
   renderBoard(segment);
   subtitleEl.textContent = segment.subtitle;
 
-  progressFillEl.style.width = ((current + 1) / total) * 100 + "%";
-  progressTextEl.textContent = "Section " + (current + 1) + " of " + total;
+  // The top bar shows the topic that is being taught right now
+  if (segment.topic) lessonTitleEl.textContent = segment.topic;
+
+  if (playlist) {
+    // "Topic 2 of 5 - section 3 of 9": the position inside the current topic
+    const sameTopic = lesson.segments.filter(function (s) { return s.topicIndex === segment.topicIndex; });
+    const local = sameTopic.indexOf(segment) + 1;
+    const topics = playlist.entries.length;
+    progressFillEl.style.width = ((segment.topicIndex + local / sameTopic.length) / topics) * 100 + "%";
+    progressTextEl.textContent = "Topic " + (segment.topicIndex + 1) + " of " + topics + " · section " + local + " of " + sameTopic.length;
+  } else {
+    progressFillEl.style.width = ((current + 1) / total) * 100 + "%";
+    progressTextEl.textContent = "Section " + (current + 1) + " of " + total;
+  }
+
+  // Near the end of this topic: start preparing the next topic so there is no long wait
+  if (playlist && shouldSpeak && current >= total - 3) prefetchNextTopic();
 
   if (shouldSpeak) playCurrent(0);
 }
@@ -426,11 +491,80 @@ function goTo(index) {
   if (index < 0) index = 0;
 
   if (index >= lesson.segments.length) {
-    finishLesson();
+    // The topic is finished. If the unit has more topics, bring the next one; otherwise the lesson is over.
+    if (hasMoreTopics()) advanceTopic(); else finishLesson();
     return;
   }
   showSegment(index, isPlaying);
 }
+
+
+/* ---------------------------------------------------------
+   A UNIT IS SEVERAL TOPICS IN A ROW (the "playlist")
+   Each topic is its own lesson from the server. While you listen to one,
+   the next is prepared in the background, then added to the end.
+   --------------------------------------------------------- */
+let playlist = null;          // { entries:[{sectionId, part, title}], index, prefs, label } or null
+let nextTopicPromise = null;  // the next topic's lesson, while it is being fetched
+let waitingForTopic = false;  // true when fetching the next topic failed (Resume tries again)
+
+// Writes topic information on each segment, so the board, progress and questions know which topic they belong to
+function tagSegments(segments, topicIndex, topicTitle, source) {
+  segments.forEach(function (seg) {
+    seg.topic = topicTitle;
+    seg.topicIndex = topicIndex;
+    if (source.docId) seg.ref = { sectionId: source.sectionId, part: source.part, scope: source.scope || "own" };
+  });
+}
+
+function hasMoreTopics() {
+  return Boolean(playlist) && playlist.index + 1 < playlist.entries.length;
+}
+
+function prefetchNextTopic() {
+  if (!hasMoreTopics() || nextTopicPromise) return;
+  const entry = playlist.entries[playlist.index + 1];
+  const isLast = playlist.index + 2 === playlist.entries.length;
+  nextTopicPromise = fetchTopicLesson(lesson.docId, entry, isLast ? "last" : "middle", playlist.prefs)
+    .then(function (data) { return { ok: true, data: data }; },
+          function (error) { return { ok: false, error: error }; });
+}
+
+let advancingTopic = false;   // stops a second tap on "Next" from adding the same topic twice
+
+async function advanceTopic() {
+  if (advancingTopic) return;
+  advancingTopic = true;
+  prefetchNextTopic();
+  const stopTimer = startWaitTimer(function (message) {
+    subtitleEl.textContent = message;
+    statusEl.textContent = "Preparing the next topic...";
+  }, "Preparing the next topic");
+
+  const result = await nextTopicPromise;
+  stopTimer();
+  nextTopicPromise = null;
+  advancingTopic = false;
+
+  if (!result.ok) {
+    // Pause here. Pressing Resume tries again.
+    waitingForTopic = true;
+    isPlaying = false;
+    stopSpeaking();
+    btnPlay.textContent = "▶ Resume";
+    subtitleEl.textContent = result.error.message + " Press Resume to try again.";
+    statusEl.textContent = "Paused";
+    return;
+  }
+
+  playlist.index++;
+  const next = result.data;
+  tagSegments(next.segments, playlist.index, next.sectionTitle || next.title, next);
+  const firstNew = lesson.segments.length;
+  lesson.segments = lesson.segments.concat(next.segments);
+  showSegment(firstNew, isPlaying);
+}
+
 
 function finishLesson() {
   isPlaying = false;
@@ -466,6 +600,12 @@ function togglePlay() {
     stopSpeaking();
     btnPlay.textContent = "▶ Resume";
     statusEl.textContent = "Paused";
+  } else if (waitingForTopic) {
+    // The next topic failed to load earlier: try again
+    waitingForTopic = false;
+    isPlaying = true;
+    btnPlay.textContent = "\u275A\u275A Pause";
+    advanceTopic();
   } else {
     // Browsers only allow sound after a tap, which is why we never auto-start.
     isPlaying = true;
@@ -547,9 +687,9 @@ async function askLecturer(mode, questionText, options) {
       nowTeaching: options.topic ? "Quiz topic: " + options.topic : now.board.heading + ". " + now.speech,
       recentlyTaught: before.map(function (seg) { return seg.speech; }).join(" "),
       docId: lesson.docId || "",
-      sectionId: lesson.sectionId || "",
-      scope: lesson.scope || "own",
-      part: lesson.part || 0,
+      sectionId: now.ref ? now.ref.sectionId : "",
+      scope: now.ref ? now.ref.scope : "own",
+      part: now.ref ? now.ref.part : 0,
       level: prefs.level,
       difficulty: prefs.difficulty
     });
@@ -561,6 +701,9 @@ async function askLecturer(mode, questionText, options) {
       data.segment.temp = true;
       data.segment.endsLesson = true;
     }
+    data.segment.topic = now.topic;                // the answer belongs to the topic being taught
+    data.segment.topicIndex = now.topicIndex;
+    data.segment.ref = now.ref;
     lesson.segments.splice(current + 1, 0, data.segment);
     isPlaying = true;
     btnPlay.textContent = "\u275A\u275A Pause";

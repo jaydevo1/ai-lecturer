@@ -410,3 +410,122 @@ body {
 .quiz-missed { padding: 10px 12px; border: 1px solid #e4dccd; border-radius: 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .quiz-missed-q { font-weight: 600; font-size: 0.95rem; }
 .quiz-missed-a { font-size: 0.9rem; color: #2f7a4a; }
+
+/* =========================================================
+   LOOK UPGRADE: real photo room, glass wall display, photo lecturer
+   (these rules come last, so they replace the older drawn-room look.
+    The controls below the stage are NOT touched: they keep the original colours.)
+   ========================================================= */
+:root { --glass-accent: #7fb0ff; }
+
+/* The stage now shows a real photo (portrait photo on phones, wide photo on desktop) */
+.stage {
+  background: #9aa0ab url("images/classroom-phone.webp") center top / cover no-repeat;
+  border: 0;
+}
+.room { display: none; }                  /* the drawn wall, floor, window and plant are not needed */
+
+/* Dark fade at the top and bottom: the middle of the photo stays bright */
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(8, 12, 24, 0.45), rgba(8, 12, 24, 0.05) 26%, rgba(8, 12, 24, 0.05) 60%, rgba(8, 12, 24, 0.6));
+}
+
+/* ---- The board: a smart display fixed to the wall (thin dark bezel + glass) ---- */
+.board {
+  left: 4%; right: 4%;
+  top: 4%;
+  height: 52%;
+  border: 7px solid #0a0f1a;              /* the bezel */
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(18, 28, 52, 0.88), rgba(14, 22, 42, 0.80)) padding-box;
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);            /* old browsers just skip the blur */
+  box-shadow: 0 24px 40px -12px rgba(10, 15, 30, 0.55), 0 0 50px rgba(79, 140, 255, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+/* the chalk tray is replaced by a soft glass reflection across the screen */
+.board::after {
+  left: 0; right: 0; top: 0; bottom: 0;
+  height: auto;
+  border-radius: 7px;
+  background: linear-gradient(115deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0) 32%);
+  pointer-events: none;
+}
+.board-tag, .board-quote-label, .board-source.is-exact { color: var(--glass-accent); }
+.board-source.is-exact { border-color: var(--glass-accent); }
+.board-quote { border-left-color: #4f8cff; background: rgba(255, 255, 255, 0.07); }
+.board-list li::before { color: var(--glass-accent); }
+.node-active { border-color: var(--glass-accent); background: rgba(79, 140, 255, 0.22); }
+
+/* ---- The lecturer: a small round photo tile ---- */
+.teacher { display: none; }               /* the drawn teacher is only a fallback */
+.stage.no-photo .teacher { display: block; }
+.stage.no-photo .lecturer-tile { display: none; }
+.stage.no-photo .room { display: block; }
+
+.lecturer-tile {
+  position: absolute;
+  right: 5%;
+  bottom: 15%;
+  width: clamp(76px, 25cqw, 104px);
+  aspect-ratio: 1;
+  z-index: 4;
+}
+.tile-photo {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  background: #8ea3b5;
+}
+.tile-photo img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 18%; display: block; }
+
+/* Green glowing ring that pulses while he speaks */
+.tile-glow {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 3px solid rgba(59, 178, 115, 0.9);
+  box-shadow: 0 0 22px rgba(59, 178, 115, 0.7);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.stage:has(.speaking-dot.is-speaking) .tile-glow { opacity: 1; animation: tile-pulse 1.1s ease-in-out infinite; }
+@keyframes tile-pulse { 50% { opacity: 0.4; transform: scale(1.04); } }
+
+/* Status badge: small dark pill above the caption (left side) */
+.stage-badge {
+  top: auto; bottom: 15%; left: 5%;
+  background: rgba(10, 15, 30, 0.82);
+  border: 0;
+  color: #fff;
+}
+.stage-badge .badge-status { color: #c9d4ea; }
+
+/* Caption (the voice-over text) sits on the picture */
+.subtitle { z-index: 5; background: rgba(8, 12, 24, 0.8); }
+
+@media (min-width: 800px) {
+  .stage {
+    aspect-ratio: 3 / 2;                  /* same shape as the photo, so nothing is cropped or zoomed */
+    width: min(100%, max(600px, calc((100vh - 300px) * 3 / 2)));
+    background-image: url("images/classroom-desktop.webp");
+    background-position: center bottom;
+  }
+  .board { left: 4%; right: 4%; top: 5%; width: auto; height: 56%; }
+  .board-heading { font-size: clamp(1.2rem, 4cqw, 2.3rem); }
+  .board-text    { font-size: clamp(0.95rem, 2.4cqw, 1.4rem); }
+  .board-quote   { font-size: clamp(0.85rem, 2.1cqw, 1.2rem); }
+  .lecturer-tile { right: 4%; bottom: 17%; width: clamp(84px, 12cqw, 130px); }
+  .stage-badge   { bottom: 17%; left: 4%; }
+  .subtitle      { left: 4%; right: 4%; width: auto; bottom: 3.5%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile-glow { animation: none !important; }
+}

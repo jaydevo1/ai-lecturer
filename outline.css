@@ -114,3 +114,17 @@ details[open] > summary::before { content: "\25BE"; }
 @media (min-width: 700px) {
   .prefs { flex-direction: row; }
 }
+
+/* =========================================================
+   NEW LAYOUT: module (collapsed) > unit (one open) > topics
+   ========================================================= */
+.module-card > summary { font-size: 1rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.module-card > details, .module-card > .leaf { margin: 0 10px 8px; }
+.summary-title { flex: 1; }
+
+.unit-card > summary { font-weight: 600; font-size: 0.95rem; }
+
+/* a topic you already generated: dimmed, with a tick */
+.leaf.is-done { background: #f1eee6; border-color: #e0d9c8; }
+.leaf.is-done .leaf-title { color: var(--muted); }
+.done-tag { color: #2f7a4a; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }

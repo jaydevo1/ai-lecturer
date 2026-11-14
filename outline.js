@@ -2,11 +2,13 @@
    CONTENTS PAGE  (outline.js)
 
    1. Find out which document to show (from the address ?doc=...).
-   2. Ask the server for its outline: GET /api/doc/<id>.
-   3. Draw the outline as folders (<details>) with Teach buttons.
-   4. When a Teach button is pressed, ask the server for a lesson
-      (POST /api/lesson), save it in sessionStorage, open the classroom.
-   common.js provides: SERVER_URL, postJson, startWaitTimer, bindPrefs
+   2. Ask the server for its contents: GET /api/doc/<id>.
+   3. Draw it as: Module (collapsed) > Unit (one open at a time) > main topics.
+   4. "Teach this" teaches one topic. "Teach the whole unit" teaches all its topics one after another.
+      Either way we ask the server for the FIRST lesson, save it, and open the classroom.
+      The classroom asks for the next topics while you listen.
+   common.js provides: apiFetch, postJson, startWaitTimer, bindPrefs,
+                       fetchTopicLesson, getDone, rememberDoc
    ========================================================= */
 
 const docTitleEl = document.getElementById("docTitle");
@@ -29,8 +31,9 @@ if (!docId) {
   try { docId = localStorage.getItem("lastDocId"); } catch (error) { docId = null; }
 }
 
-const MAX_PART_BUTTONS = 12;   // do not draw 40 buttons for a giant section
 let isBusy = false;
+let courseName = "";
+let doneIds = [];     // topics you already made a lesson for (kept in this browser)
 
 
 /* ---------- small helpers ---------- */
@@ -51,68 +54,97 @@ function setAllButtonsDisabled(disabled) {
   document.querySelectorAll(".btn").forEach(function (button) { button.disabled = disabled; });
 }
 
-// Makes the buttons for ONE teachable piece of text.
-// If the text is longer than one lesson, it is split in parts: "Part 1", "Part 2"...
-function makeTeachButtons(node, scope, partCount, wholeLabel) {
-  const buttons = [];
-  if (partCount <= 1) {
-    buttons.push(makeTeachButton(wholeLabel, node, scope, 0));
-  } else if (partCount <= MAX_PART_BUTTONS) {
-    for (let i = 0; i < partCount; i++) {
-      buttons.push(makeTeachButton(wholeLabel + ": part " + (i + 1) + " of " + partCount, node, scope, i));
-    }
-  } else {
-    buttons.push(makeEl("span", "short-note", "Too long to teach at once. Open it and pick a smaller section."));
-  }
-  return buttons;
+// A node is a "topic" when it has no children (it is taught by itself)
+function isLeaf(node) {
+  return node.children.length === 0;
 }
 
-function makeTeachButton(label, node, scope, part) {
-  const button = makeEl("button", "btn", label);
-  button.type = "button";
-  button.addEventListener("click", function () {
-    teach(node, scope, part);
+// A "unit" is a node whose children are all topics
+function isUnit(node) {
+  return node.children.length > 0 && node.children.every(isLeaf);
+}
+
+// The lessons a node needs, in order. A long topic is split into parts, each part is one entry.
+function entriesFor(leaves) {
+  const entries = [];
+  leaves.forEach(function (node) {
+    for (let part = 0; part < node.parts; part++) {
+      entries.push({
+        sectionId: node.id,
+        part: part,
+        title: node.title + (node.parts > 1 ? " (part " + (part + 1) + " of " + node.parts + ")" : "")
+      });
+    }
   });
+  return entries;
+}
+
+function makeButton(label, className, onClick) {
+  const button = makeEl("button", className, label);
+  button.type = "button";
+  button.addEventListener("click", onClick);
   return button;
 }
 
 
 /* ---------- drawing the tree ---------- */
-function renderNode(node, depth) {
-  const hasChildren = node.children.length > 0;
-
-  if (hasChildren) {
-    // A folder: a module or unit that has sections inside it
-    const details = makeEl("details", "depth-" + Math.min(depth + 1, 3));
-    if (depth === 0 && treeEl.children.length === 0) details.open = true;   // open the very first one
-
-    const summary = makeEl("summary", "", node.title);
-    summary.append(makeEl("span", "meta", "p. " + node.page));
-    details.append(summary);
-
-    // "Teach the whole unit" buttons (everything inside this folder)
-    if (node.rangeChars >= 150) {
-      const actions = makeEl("div", "actions");
-      makeTeachButtons(node, "all", node.rangeParts, "Teach the whole thing").forEach(function (b) { actions.append(b); });
-      details.append(actions);
-    }
-
-    node.children.forEach(function (child) { details.append(renderNode(child, depth + 1)); });
-    return details;
-  }
-
-  // A single section (no children)
-  const leaf = makeEl("div", "leaf");
-  leaf.append(makeEl("span", "leaf-title", node.title));
-
-  if (node.teachable) {
-    makeTeachButtons(node, "own", node.parts, "Teach this").forEach(function (b) { leaf.append(b); });
-  } else {
-    leaf.classList.add("is-short");
-    leaf.append(makeEl("span", "short-note", "very short, p. " + node.page));
-  }
-  return leaf;
+function renderTopic(node) {
+  const done = doneIds.includes(node.id);
+  const row = makeEl("div", "leaf" + (done ? " is-done" : ""));
+  row.append(makeEl("span", "leaf-title", node.title));
+  if (done) row.append(makeEl("span", "done-tag", "✓ Generated"));
+  row.append(makeButton(done ? "Teach again" : "Teach this", done ? "btn secondary" : "btn", function () {
+    teach(entriesFor([node]), node.title);
+  }));
+  return row;
 }
+
+function renderUnit(node) {
+  const details = makeEl("details", "unit-card");
+  const summary = makeEl("summary", "");
+  summary.append(makeEl("span", "summary-title", node.title));
+  const doneCount = node.children.filter(function (c) { return doneIds.includes(c.id); }).length;
+  summary.append(makeEl("span", "meta", doneCount + " of " + node.children.length + " generated"));
+  details.append(summary);
+
+  const actions = makeEl("div", "actions");
+  actions.append(makeButton("Teach the whole unit", "btn", function () {
+    teach(entriesFor(node.children), node.title);
+  }));
+  details.append(actions);
+
+  node.children.forEach(function (child) { details.append(renderTopic(child)); });
+
+  // Only ONE unit open at a time: opening this one closes all the others
+  details.addEventListener("toggle", function () {
+    if (!details.open) return;
+    treeEl.querySelectorAll("details.unit-card[open]").forEach(function (other) {
+      if (other !== details) other.open = false;
+    });
+  });
+  return details;
+}
+
+function renderNode(node) {
+  if (isLeaf(node)) return renderTopic(node);     // a document with no units: topics straight in the list
+  if (isUnit(node)) return renderUnit(node);
+
+  // A module: collapsed, shows its units
+  const details = makeEl("details", "module-card");
+  const summary = makeEl("summary", "");
+  summary.append(makeEl("span", "summary-title", node.title));
+  summary.append(makeEl("span", "meta", "p. " + node.page));
+  details.append(summary);
+  node.children.forEach(function (child) { details.append(renderNode(child)); });
+  return details;
+}
+
+function drawTree(outline) {
+  treeEl.replaceChildren();
+  outline.forEach(function (node) { treeEl.append(renderNode(node)); });
+}
+
+let currentOutline = [];
 
 async function loadOutline() {
   if (!docId) {
@@ -126,14 +158,18 @@ async function loadOutline() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Could not load the contents.");
 
-    docTitleEl.textContent = data.courseTitle || data.name;
+    rememberDoc(docId);
+    try { localStorage.setItem("lastDocId", docId); } catch (error) { /* fine */ }
+
+    courseName = data.courseTitle || data.name;
+    docTitleEl.textContent = courseName;
     docMetaEl.textContent = data.pages + " page" + (data.pages === 1 ? "" : "s") + " read";
     outlineNoteEl.textContent =
-      "Tap a unit to open it, then tap Teach. Contents made by: " + data.outlineSource + ". " +
-      "If a heading looks wrong, the teaching text is still your own material.";
+      "Open a module, then a unit. Tap Teach on a topic, or teach the whole unit. Topics you already generated are dimmed.";
 
-    treeEl.replaceChildren();
-    data.outline.forEach(function (node) { treeEl.append(renderNode(node, 0)); });
+    currentOutline = data.outline;
+    doneIds = getDone(docId);
+    drawTree(currentOutline);
   } catch (error) {
     console.error(error);
     docTitleEl.textContent = "Could not load";
@@ -143,28 +179,30 @@ async function loadOutline() {
   }
 }
 
+// Coming back from the classroom with the Back button: refresh the "generated" marks
+window.addEventListener("pageshow", function (event) {
+  if (event.persisted && currentOutline.length) {
+    doneIds = getDone(docId);
+    drawTree(currentOutline);
+  }
+});
 
-/* ---------- asking for a lesson ---------- */
-async function teach(node, scope, part) {
-  if (isBusy) return;
+
+/* ---------- asking for the first lesson ---------- */
+async function teach(entries, label) {
+  if (isBusy || entries.length === 0) return;
   isBusy = true;
   setAllButtonsDisabled(true);
 
   const prefs = getPrefs();
-  const stopTimer = startWaitTimer(function (m) { showBusy(m, false); }, 'Preparing "' + node.title + '"');
+  const stopTimer = startWaitTimer(function (m) { showBusy(m, false); }, 'Preparing "' + label + '"');
 
   try {
-    const lesson = await postJson("/api/lesson", {
-      docId: docId,
-      sectionId: node.id,
-      scope: scope,
-      part: part,
-      level: prefs.level,
-      difficulty: prefs.difficulty,
-      approach: prefs.approach
-    });
+    // One topic = "only". Several topics: this is the "first"; the classroom fetches the rest while you listen.
+    const first = await fetchTopicLesson(docId, entries[0], entries.length === 1 ? "only" : "first", prefs);
 
-    sessionStorage.setItem("currentLesson", JSON.stringify(lesson));
+    first.playlist = { entries: entries, index: 0, prefs: prefs, label: label };
+    sessionStorage.setItem("currentLesson", JSON.stringify(first));
     window.location.href = "classroom.html";
   } catch (error) {
     console.error(error);

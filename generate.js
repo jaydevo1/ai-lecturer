@@ -90,6 +90,7 @@ uploadForm.addEventListener("submit", async function (event) {
 
     try {
       localStorage.setItem("lastDocId", result.docId);
+      rememberDoc(result.docId);                    // this browser's own list of uploads
       sessionStorage.removeItem("currentLesson");   // forget any older lesson
     } catch (storageError) {
       // fine: the docId is also put in the page address below
@@ -142,13 +143,29 @@ async function loadSavedMaterial() {
   const card = document.getElementById("savedCard");
   const list = document.getElementById("savedList");
   try {
-    const response = await apiFetch("/api/docs");
-    if (!response.ok) return;
-    const data = await response.json();
-    if (!data.docs || data.docs.length === 0) return;
+    // On your own computer the server may list everything. On a shared server it will not (that
+    // would show other people's uploads), so we ask only about the documents THIS browser uploaded.
+    let docs = [];
+    const all = await apiFetch("/api/docs");
+    if (all.ok) {
+      docs = (await all.json()).docs || [];
+    } else {
+      const ids = getMyDocIds();
+      if (ids.length === 0) return;
+      const response = await apiFetch("/api/docs/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: ids })
+      });
+      if (!response.ok) return;
+      docs = (await response.json()).docs || [];
+      // keep the order of our own list (newest first)
+      docs.sort(function (a, b) { return ids.indexOf(a.docId) - ids.indexOf(b.docId); });
+    }
+    if (docs.length === 0) return;
 
     list.replaceChildren();
-    data.docs.forEach(function (doc) {
+    docs.forEach(function (doc) {
       const item = document.createElement("li");
       const link = document.createElement("a");
       link.href = "outline.html?doc=" + encodeURIComponent(doc.docId);
