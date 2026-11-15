@@ -4,9 +4,10 @@
    1. Find out which document to show (from the address ?doc=...).
    2. Ask the server for its contents: GET /api/doc/<id>.
    3. Draw it as: Module (collapsed) > Unit (one open at a time) > main topics.
-   4. "Teach this" teaches one topic. "Teach the whole unit" teaches all its topics one after another.
-      Either way we ask the server for the FIRST lesson, save it, and open the classroom.
-      The classroom asks for the next topics while you listen.
+   4. "Teach this" teaches ONE topic (a very long topic is split into parts that follow each other).
+      The FIRST topic of a unit starts with the unit's introduction and goals; the LAST topic of a unit
+      ends with the unit's conclusion and summary. Topics in between just start teaching.
+      We ask the server for the first lesson, save it, and open the classroom.
    common.js provides: apiFetch, postJson, startWaitTimer, bindPrefs,
                        fetchTopicLesson, getDone, rememberDoc
    ========================================================= */
@@ -64,18 +65,24 @@ function isUnit(node) {
   return node.children.length > 0 && node.children.every(isLeaf);
 }
 
-// The lessons a node needs, in order. A long topic is split into parts, each part is one entry.
-function entriesFor(leaves) {
+// The lessons ONE topic needs, in order. A long topic is split into parts, each part is one entry.
+// "siblings" = all the topics of the same unit. It decides how the lesson opens and closes:
+//   first topic of the unit -> introduction + goals first;  last topic -> conclusion + recap at the end.
+function entriesForTopic(node, siblings) {
+  const index = siblings.indexOf(node);
+  const isFirstTopic = index <= 0;
+  const isLastTopic = index === siblings.length - 1;
   const entries = [];
-  leaves.forEach(function (node) {
-    for (let part = 0; part < node.parts; part++) {
-      entries.push({
-        sectionId: node.id,
-        part: part,
-        title: node.title + (node.parts > 1 ? " (part " + (part + 1) + " of " + node.parts + ")" : "")
-      });
-    }
-  });
+  for (let part = 0; part < node.parts; part++) {
+    const intro = isFirstTopic && part === 0;
+    const recap = isLastTopic && part === node.parts - 1;
+    entries.push({
+      sectionId: node.id,
+      part: part,
+      position: intro && recap ? "only" : intro ? "first" : recap ? "last" : "middle",
+      title: node.title + (node.parts > 1 ? " (part " + (part + 1) + " of " + node.parts + ")" : "")
+    });
+  }
   return entries;
 }
 
@@ -88,13 +95,13 @@ function makeButton(label, className, onClick) {
 
 
 /* ---------- drawing the tree ---------- */
-function renderTopic(node) {
+function renderTopic(node, siblings) {
   const done = doneIds.includes(node.id);
   const row = makeEl("div", "leaf" + (done ? " is-done" : ""));
   row.append(makeEl("span", "leaf-title", node.title));
   if (done) row.append(makeEl("span", "done-tag", "✓ Generated"));
   row.append(makeButton(done ? "Teach again" : "Teach this", done ? "btn secondary" : "btn", function () {
-    teach(entriesFor([node]), node.title);
+    teach(entriesForTopic(node, siblings), node.title);
   }));
   return row;
 }
@@ -107,13 +114,7 @@ function renderUnit(node) {
   summary.append(makeEl("span", "meta", doneCount + " of " + node.children.length + " generated"));
   details.append(summary);
 
-  const actions = makeEl("div", "actions");
-  actions.append(makeButton("Teach the whole unit", "btn", function () {
-    teach(entriesFor(node.children), node.title);
-  }));
-  details.append(actions);
-
-  node.children.forEach(function (child) { details.append(renderTopic(child)); });
+  node.children.forEach(function (child) { details.append(renderTopic(child, node.children)); });
 
   // Only ONE unit open at a time: opening this one closes all the others
   details.addEventListener("toggle", function () {
@@ -126,7 +127,7 @@ function renderUnit(node) {
 }
 
 function renderNode(node) {
-  if (isLeaf(node)) return renderTopic(node);     // a document with no units: topics straight in the list
+  if (isLeaf(node)) return renderTopic(node, [node]);     // a document with no units: each topic stands alone
   if (isUnit(node)) return renderUnit(node);
 
   // A module: collapsed, shows its units
@@ -165,7 +166,7 @@ async function loadOutline() {
     docTitleEl.textContent = courseName;
     docMetaEl.textContent = data.pages + " page" + (data.pages === 1 ? "" : "s") + " read";
     outlineNoteEl.textContent =
-      "Open a module, then a unit. Tap Teach on a topic, or teach the whole unit. Topics you already generated are dimmed.";
+      "Open a module, then a unit, then tap Teach this on the topic you want. Topics you already generated are marked.";
 
     currentOutline = data.outline;
     doneIds = getDone(docId);
@@ -198,8 +199,8 @@ async function teach(entries, label) {
   const stopTimer = startWaitTimer(function (m) { showBusy(m, false); }, 'Preparing "' + label + '"');
 
   try {
-    // One topic = "only". Several topics: this is the "first"; the classroom fetches the rest while you listen.
-    const first = await fetchTopicLesson(docId, entries[0], entries.length === 1 ? "only" : "first", prefs);
+    // Each entry knows how its lesson opens and closes (see entriesForTopic)
+    const first = await fetchTopicLesson(docId, entries[0], entries[0].position || "only", prefs);
 
     first.playlist = { entries: entries, index: 0, prefs: prefs, label: label };
     sessionStorage.setItem("currentLesson", JSON.stringify(first));

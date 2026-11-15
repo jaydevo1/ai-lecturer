@@ -188,15 +188,8 @@ function renderBoard(segment) {
   const top = makeEl("div", "board-top");
   top.append(makeEl("p", "board-tag", board.tag));
 
-  let sourceLabel = "Extra explanation";
-  let sourceClass = "board-source";
-  if (segment.quote) {
-    sourceLabel = "Exact wording from your material";
-    sourceClass += " is-exact";
-  } else if (segment.source === "document") {
-    sourceLabel = "Based on your material";
-  }
-  top.append(makeEl("span", sourceClass, sourceLabel));
+  // Only extra content (the lecturer's own example or analogy) is labelled; the material's own points need no label
+  if (segment.source === "added") top.append(makeEl("span", "board-source", "Example / extra"));
   boardContentEl.append(top);
 
   boardContentEl.append(makeEl("h2", "board-heading", board.heading));
@@ -228,13 +221,6 @@ function renderBoard(segment) {
     boardContentEl.append(list);
   }
 
-  // The exact excerpt (the server already checked it word for word)
-  if (segment.quote) {
-    const box = makeEl("div", "board-quote");
-    box.append(makeEl("span", "board-quote-label", "From your material"));
-    box.append(document.createTextNode("“" + segment.quote + "”"));
-    boardContentEl.append(box);
-  }
 }
 
 
@@ -278,11 +264,8 @@ if (speechSupported) {
 // Cuts the text of a segment into sentences. If the segment has an exact quote,
 // the lecturer reads it out first.
 function splitIntoParts(segment) {
-  let text = "";
-  if (segment.quote) {
-    text += "Your material says: " + segment.quote.replace(/[.!?\s]+$/, "") + ". ";
-  }
-  text += segment.speech;
+  // (the server already makes sure any exact sentence from the material is part of "speech")
+  const text = segment.speech;
   const pieces = text.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [text];
   return pieces.map(function (p) { return p.trim(); }).filter(Boolean);
 }
@@ -525,7 +508,7 @@ function prefetchNextTopic() {
   if (!hasMoreTopics() || nextTopicPromise) return;
   const entry = playlist.entries[playlist.index + 1];
   const isLast = playlist.index + 2 === playlist.entries.length;
-  nextTopicPromise = fetchTopicLesson(lesson.docId, entry, isLast ? "last" : "middle", playlist.prefs)
+  nextTopicPromise = fetchTopicLesson(lesson.docId, entry, entry.position || (isLast ? "last" : "middle"), playlist.prefs)
     .then(function (data) { return { ok: true, data: data }; },
           function (error) { return { ok: false, error: error }; });
 }

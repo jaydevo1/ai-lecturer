@@ -48,7 +48,7 @@ const TRIES_PER_MODEL = 2;
 const THINKING_LEVEL = (process.env.GEMINI_THINKING_LEVEL || "").trim();  // optional, e.g. "low"
 
 const MAX_TEXT_LENGTH = 15000;          // longest text you can paste
-const SECTION_CHAR_LIMIT = 12000;       // longest piece of text turned into ONE lesson
+const SECTION_CHAR_LIMIT = 6000;        // longest piece of text turned into ONE lesson (smaller = nothing gets skipped)
 const MAX_UPLOAD_BYTES = 14 * 1024 * 1024;   // all uploaded files together
 const MAX_PDF_PAGES = 600;
 const MAX_IMAGES = 6;
@@ -57,7 +57,7 @@ const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "cache");   // s
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "docs");      // uploaded documents
 
 // Change this word when the teaching prompt changes, so old saved lessons are not reused
-const PROMPT_VERSION = "v4";
+const PROMPT_VERSION = "v5";
 
 // Online use: a secret code that friends must type, and a daily limit per person,
 // so nobody can use up the free Gemini allowance. If ACCESS_CODE is empty (your own computer), the code is not asked.
@@ -187,10 +187,12 @@ For EVERY important concept in the material, teach it across several segments in
 5. Ask the learner a short question to think about, then answer it.
 
 Never rush. Never say "and so on". Explain WHY, not only WHAT. If the material lists steps or items, walk through each one.
+
+COVERAGE (very important): before you write, silently list EVERY definition, term, type, characteristic, advantage, disadvantage, step, formula, rule and example in the material. Each one must be taught in some segment. Never skip one. If you are short of segments, put two related items in one segment, but never leave an item out. Never end the topic until the last point of the material has been taught.
 Match depth and vocabulary to the learner's level and teaching difficulty: "Very simple" means short words and many analogies; "Detailed" or "Advanced" means precise terms and deeper reasoning.
 
 Each segment has:
-- "speech": what you say out loud. 3 to 5 sentences, 45 to 80 words. Natural spoken English, no bullet points, no symbols that are hard to say aloud.
+- "speech": what you say out loud. 3 to 6 sentences, 50 to 90 words. Natural spoken English, no bullet points, no symbols that are hard to say aloud.
 - "subtitle": a very short version of the point (under 12 words).
 - "source": "document" if the content comes directly from the material, "added" if it is your own explanation, analogy or example. Never present your additions as if the document said them. Do not invent facts about the course.
 - "quote": (optional) see the quote rules. Leave it as an empty string when it does not apply.
@@ -206,13 +208,15 @@ Keep every board line short.
 `;
 
 const EXAM_RULES = `
-EXAM MODE (very important). This learner is preparing for an exam that rewards the EXACT wording of the course material.
-- Never rename, simplify or swap the material's terms. Use the material's own words and spellings for every term, definition, list item and step.
-- QUOTE RULES: for every segment whose source is "document", set "quote" to ONE excerpt copied CHARACTER FOR CHARACTER from the material (1 to 3 sentences, at most 60 words). Do not fix spelling, do not change any word, do not join sentences from different places. If you cannot copy it exactly, leave "quote" as an empty string.
-- In "speech", introduce the idea briefly and then explain it in simple words. Do NOT repeat the quote inside "speech", because the quote is shown and read out separately.
-- Keep the order of the material. Cover EVERY definition, list, type, advantage, disadvantage, step and example in the material. Do not skip points.
-- The board "heading", "text" and "items" for document segments must use the material's exact wording as well.
-- Any goals or recap segment that comes from the document must use the material's exact wording too.
+EXAM MODE (NOUN exam preparation). The learner will be examined on the EXACT wording of this material, so definitions and lists must come from the material word for word. But you are a lecturer TEACHING, not a reader.
+- Teach naturally, like a real lecturer in a classroom. NEVER say phrases like "your material says", "the material states", "the document says", "according to the text", "as written in your PDF". Just teach.
+- Every definition, key statement and list of types, characteristics, advantages, disadvantages or steps: say it using the material's own words and spellings, built naturally into what you say. For example: "So, what is a computer? A computer is basically defined as a tool or machine used for processing data to give required information." Never rename, reword or simplify a defined term or a list item.
+- After you have said it in the material's words, EXPLAIN it in simple words (different wording, never the same sentence twice) and then give an example or analogy that YOU make up. Segments that are your own explanation or example have source "added". Segments that state the material's definition or list have source "document".
+- Lists: keep the material's order and each item's wording, and teach every item with at least one sentence of explanation.
+- Board: short key points only, in the material's own words (the term as heading, then its definition or its items). Never paste long paragraphs on the board.
+- Cover EVERY definition, characteristic, type, advantage, disadvantage, step, formula and example in the material, in the material's order. Do not skip points.
+- "quote": for each segment where you state a definition, a key sentence or a list item from the material, set "quote" to that ONE sentence copied CHARACTER FOR CHARACTER from the material (at most 60 words) and say exactly that sentence in "speech". The quote is only used by the server to check accuracy: the learner never sees it. If you cannot copy it exactly, leave it empty.
+- Any goals or recap taken from the document use the document's wording too.
 `;
 
 function buildSystemInstruction(approach) {
@@ -221,14 +225,10 @@ function buildSystemInstruction(approach) {
 
 // Short text gets a shorter lesson (faster). Exam mode needs more segments to cover everything.
 function segmentRange(textLength, approach) {
-  if (approach === "exam") {
-    if (textLength < 1200) return "8 to 12";
-    if (textLength < 4000) return "14 to 20";
-    return "18 to 26";
-  }
-  if (textLength < 1200) return "8 to 12";
-  if (textLength < 4000) return "12 to 18";
-  return "16 to 24";
+  // enough segments to cover every point: about one per 330 characters of material (exam) or 420 (explain)
+  const per = approach === "exam" ? 330 : 420;
+  const target = Math.min(24, Math.max(8, Math.round(textLength / per)));
+  return target + " to " + (target + 4);
 }
 
 // Tells the AI how to open and close THIS lesson. A unit is taught as several lessons in a row
@@ -499,8 +499,9 @@ function cleanLesson(raw, sourceText) {
   let removed = 0;
 
   (raw.segments || []).forEach(function (seg) {
-    const speech = String(seg.speech || "").trim();
+    let speech = String(seg.speech || "").trim();
     if (speech === "") return;
+    let speechFixed = null;
 
     const board = seg.board || {};
     const type = ALLOWED_BOARD_TYPES.includes(board.type) ? board.type : "definition";
@@ -510,11 +511,16 @@ function cleanLesson(raw, sourceText) {
     if (quote) {
       if (quoteIsInSource(quote, sourceWords)) {
         verified++;
+        // the exact sentence must really be spoken: if the AI paraphrased it, say the exact one first
+        if (!(" " + wordsOnly(speech) + " ").includes(" " + wordsOnly(quote) + " ")) {
+          speechFixed = quote.replace(/\s+/g, " ") + " " + speech;
+        }
       } else {
         quote = "";      // not found word for word: never show it as exact
         removed++;
       }
     }
+    if (speechFixed) speech = speechFixed;
 
     segments.push({
       speech: speech,
@@ -676,7 +682,31 @@ function findHeadingCandidates(text, pageStarts) {
     offset += raw.length + 1;
   });
 
+  // Contents pages: lines like "Unit 2 Basic Concepts ............ 9" (dots, then a page number).
+  // Where several of them sit close together, that whole stretch is a contents page, not real headings.
+  const tocLine = /(\.{3,}|\u2026+|(\.\s){4,})\s*\d{1,3}\s*$/;
+  const tocHits = [0];
+  lines.forEach(function (l, i) { tocHits.push(tocHits[i] + (tocLine.test(l.line) ? 1 : 0)); });
+  function inContents(i) {
+    // only the contents lines themselves (plus a title that wraps onto the next line), and only where several sit together
+    if (!tocLine.test(lines[i].line) && !(i + 1 < lines.length && tocLine.test(lines[i + 1].line))) return false;
+    const from = Math.max(0, i - 30);
+    const to = Math.min(lines.length, i + 31);
+    return tocHits[to] - tocHits[from] >= 4;
+  }
+  lines.forEach(function (l, i) { l.toc = inContents(i); });
+
+  // A bare "MODULE 1" / "UNIT 2" line that repeats many times is a running page header, not a heading
+  const bareCount = {};
+  lines.forEach(function (l) {
+    if (/^(module|unit)\s+\d+\s*$/i.test(l.line)) {
+      const k = l.line.toLowerCase();
+      bareCount[k] = (bareCount[k] || 0) + 1;
+    }
+  });
+
   // Lines that appear on many different pages are running headers/footers: ignore them
+  pageStarts = pageStarts && pageStarts.length ? pageStarts : [0];
   const pageCount = pageStarts.length;
   const pagesPerLine = {};
   lines.forEach(function (l) {
@@ -689,7 +719,8 @@ function findHeadingCandidates(text, pageStarts) {
 
   let candidates = [];
   lines.forEach(function (l) {
-    if (!l.line || !looksLikeHeading(l.line)) return;
+    if (!l.line || l.toc || !looksLikeHeading(l.line)) return;
+    if (bareCount[l.line.toLowerCase()] >= 3) return;
     const key = l.line.toLowerCase().replace(/\d+/g, "#");
     if (pagesPerLine[key] && pagesPerLine[key].size >= repeatLimit) return;
     candidates.push({ offset: l.offset, line: l.line, page: pageOfOffset(pageStarts, l.offset) });
@@ -773,7 +804,84 @@ function chunkOutline(text, pageStarts) {
   return items;
 }
 
+/* ---------------------------------------------------------
+   RULE-BASED OUTLINE (no AI): for NOUN-style course materials
+     MODULE 1 ...  >  UNIT 1 ...  >  1.0 Introduction, 2.0 Objectives,
+     3.0 Main Content (3.1, 3.2 ... = the topics), 4.0 Conclusion, 5.0 Summary,
+     6.0 Tutor-Marked Assignment, 7.0 References.
+   Plain rules read this layout exactly, so no module or topic can go missing.
+   Returns the finished items, or null when the document does not look like this.
+   --------------------------------------------------------- */
+const MODULE_RE = new RegExp("^module\\s+(\\d+|[ivx]+|" + NUMBER_WORDS + ")\\b", "i");
+const UNIT_RE = new RegExp("^unit\\s+(\\d+|[ivx]+|" + NUMBER_WORDS + ")\\b", "i");
+
+const ACRONYMS = ["cpu", "ram", "rom", "ict", "vdu", "dc", "ac", "lan", "wan", "os", "pc", "cd", "dvd", "usb", "url", "html", "alu", "bios", "gui", "gsm", "ip", "it", "ai"];
+
+// "BASIC CONCEPTS" -> "Basic Concepts" (only when the whole line is in capitals)
+function tidyTitle(title) {
+  let t = title.replace(/\s+/g, " ").trim();
+  const letters = t.replace(/[^A-Za-z]/g, "");
+  if (letters.length >= 4 && letters === letters.toUpperCase()) {
+    const small = ["of", "and", "the", "in", "to", "for", "a", "an", "on", "or", "with", "at", "by"];
+    t = t.toLowerCase().split(" ").map(function (w, i, arr) {
+      if (i > 0 && small.includes(w) && !/\d$/.test(arr[i - 1])) return w;      // "Unit 2 A Historical": keep the capital after a number
+      if (/^(i{1,3}|iv|vi{0,3}|ix|x)$/.test(w) || ACRONYMS.includes(w)) return w.toUpperCase();   // "ii", "dc", "cpu"
+      return w.replace(/^([^a-z]*)([a-z])/, function (m, a, b) { return a + b.toUpperCase(); });
+    }).join(" ");
+  }
+  return t.slice(0, 90);
+}
+
+function ruleBasedOutline(text, pageStarts) {
+  const candidates = findHeadingCandidates(text, pageStarts);
+  let groups = 0, numbered = 0;
+  candidates.forEach(function (c) {
+    if (MODULE_RE.test(c.line) || UNIT_RE.test(c.line)) groups++;
+    else if (/^\d{1,2}\.[1-9]\d?\s/.test(c.line)) numbered++;
+  });
+  if (groups < 2 || numbered < 2) return null;
+
+  const raw = [];
+  candidates.forEach(function (c) {
+    let title = c.line;
+    let kind = null;
+    const byWords = kindByRules(title);
+
+    // Course-guide lines such as "Module 5 Unit 4: This unit concludes the discussions on ..." describe a unit, they are not headings
+    if ((MODULE_RE.test(title) || UNIT_RE.test(title)) &&
+        (/^module\s+\S+\s+unit\s+\S+/i.test(title) || /\b(this|these)\s+(unit|module|course)\b/i.test(title))) return;
+
+    if (MODULE_RE.test(title)) kind = "module";
+    else if (UNIT_RE.test(title)) kind = "unit";
+    else if (byWords === "merge") return;
+    else if (byWords) kind = byWords;                       // introduction, objectives, summary ...
+    else {
+      const m = title.match(/^(\d{1,2})\.(\d{1,2})(\.\d+)?\.?\s+(.*)$/);
+      if (!m || m[3]) return;                              // not numbered like 3.1, or a deeper 3.1.2 detail
+      if (m[2] === "0" && /^main\s+content/i.test(m[4])) return;   // "3.0 MAIN CONTENT" is only a label
+      kind = "topic";
+    }
+
+    // "UNIT 1" with the name on the next line: join them
+    if ((kind === "module" || kind === "unit") && title.length <= 12) {
+      const after = text.slice(c.offset + c.line.length).split("\n").map(function (l) { return l.trim(); }).filter(Boolean)[0] || "";
+      if (after && after.length <= 80 && !MODULE_RE.test(after) && !UNIT_RE.test(after) && !/^\d/.test(after)) title = title + " " + after;
+    }
+    raw.push({ offset: c.offset, title: tidyTitle(title), kind: kind, page: c.page });
+  });
+
+  const items = buildItems(raw, text);
+  return items.some(isStructural) ? items : null;
+}
+
 async function buildOutline(text, pageStarts, docName) {
+  // First choice: read the NOUN layout with plain rules (fast, free, and nothing goes missing)
+  const byRules = ruleBasedOutline(text, pageStarts);
+  if (byRules && byRules.filter(isStructural).length >= 3) {
+    console.log("Outline built by rules (module / unit / numbered topics).");
+    return { items: byRules, courseTitle: "", source: "rules (module / unit / numbered topics)" };
+  }
+
   const candidates = findHeadingCandidates(text, pageStarts);
   console.log("Heading candidates found: " + candidates.length);
 
@@ -859,15 +967,36 @@ function buildItems(raw, text) {
 
   // 1. A contents page lists headings with almost no text under them. If the same heading
   //    appears again later, the early one is the contents-page copy: drop it.
+  // "Unit 2 Historical Overview" in a list and "UNIT 2 A HISTORICAL OVERVIEW" later are the same unit
+  function groupKey(item) {
+    const m = String(item.title).match(/^(module|unit)\s+(\d+|[ivx]+)\b/i);
+    return m && item.kind === m[1].toLowerCase() ? m[1].toLowerCase() + m[2].toLowerCase() : null;
+  }
   const before = items;
   items = before.filter(function (item, idx) {
     if (ownLength(before, idx) >= 150) return true;
     const key = normKey(item.title);
+    const gKey = groupKey(item);
     for (let j = idx + 1; j < before.length; j++) {
       if (normKey(before[j].title) === key) return false;
+      if (gKey && groupKey(before[j]) === gKey) return false;
+      if (gKey && item.kind === "unit" && before[j].kind === "module") break;   // unit numbers start again in the next module
     }
     return true;
   });
+
+  // Everything before the first module (or the first unit) is the course guide / front matter: not taught
+  // (a real module is followed by its units or its sections, never straight by another module)
+  function realStart(kind) {
+    let idx = items.findIndex(function (i, n) {
+      return i.kind === kind && n + 1 < items.length && items[n + 1].kind !== "module";
+    });
+    if (idx < 0) idx = items.findIndex(function (i) { return i.kind === kind; });
+    return idx;
+  }
+  let firstGroup = realStart("module");
+  if (firstGroup < 0) firstGroup = realStart("unit");
+  if (firstGroup > 0) items = items.slice(firstGroup);
 
   // 2. A topic with almost no text is not worth teaching on its own: its text joins the item before it
   const before2 = items;
@@ -987,7 +1116,11 @@ function lessonSlice(doc, item, scope) {
 function specialText(doc, ownerId, kind, maxChars) {
   const pieces = doc.items
     .filter(function (i) { return i.kind === kind && i.ownerId === ownerId; })
-    .map(function (i) { return doc.text.slice(i.start, i.end).split("\n").slice(1).join("\n").trim(); })
+    .map(function (i) {
+      return doc.text.slice(i.start, i.end).split("\n").slice(1)
+        .filter(function (l) { return !/^\s*\d+\.\d+\s+main\s+content\s*$/i.test(l); })   // the "3.0 MAIN CONTENT" label
+        .join("\n").trim();
+    })
     .filter(Boolean);
   return pieces.join("\n\n").slice(0, maxChars);
 }
@@ -1004,16 +1137,33 @@ function saveDoc(doc) {
 // Documents saved by an older version of this server have no "kind" on their headings.
 // Rebuild their structure once, from the saved text, with no Gemini request.
 function upgradeDoc(doc) {
-  if (!doc || doc.version === 2 || !Array.isArray(doc.items)) return doc;
-  const raw = doc.items.map(function (i) {
-    let kind = kindByRules(i.title);
-    if (!kind) kind = i.level <= 1 ? "module" : i.level === 2 ? "unit" : "topic";
-    return { offset: i.start, title: i.title, page: i.page, kind: kind };
-  }).filter(function (i) { return i.kind !== "merge"; });
-  let items = buildItems(raw, doc.text);
-  if (items.length === 0) items = buildItems(chunkOutline(doc.text, [0]), doc.text);
-  doc.items = items;
-  doc.version = 2;
+  if (!doc || doc.version >= 4 || !Array.isArray(doc.items)) return doc;
+  const oldItems = doc.items;
+  let items = null;
+  try {
+    items = ruleBasedOutline(doc.text, doc.pageStarts || null);
+    if (items) {
+      // old documents did not save where pages start: borrow the page numbers of the old headings
+      items.forEach(function (it) {
+        let page = 1;
+        oldItems.forEach(function (o) { if (o.start <= it.start && o.page) page = o.page; });
+        it.page = page;
+      });
+      doc.outlineSource = "rules (module / unit / numbered topics)";
+    }
+  } catch (e) { items = null; }
+
+  if (!items && doc.version !== 2) {
+    const raw = oldItems.map(function (i) {
+      let kind = kindByRules(i.title);
+      if (!kind) kind = i.level <= 1 ? "module" : i.level === 2 ? "unit" : "topic";
+      return { offset: i.start, title: i.title, page: i.page, kind: kind };
+    }).filter(function (i) { return i.kind !== "merge"; });
+    items = buildItems(raw, doc.text);
+    if (items.length === 0) items = buildItems(chunkOutline(doc.text, [0]), doc.text);
+  }
+  if (items) doc.items = items;
+  doc.version = 4;
   try { saveDoc(doc); } catch (e) { /* not saving is fine, it will be rebuilt next time */ }
   return doc;
 }
@@ -1158,7 +1308,8 @@ app.post("/api/upload", async function (req, res) {
       chars: joined.text.length,
       outlineSource: built.source,
       createdAt: new Date().toISOString(),
-      version: 2,
+      version: 4,
+      pageStarts: joined.pageStarts,
       text: joined.text,
       items: items
     };
@@ -1494,7 +1645,9 @@ app.post("/api/quiz", async function (req, res) {
       // share the room fairly between the topics
       const each = Math.floor(12000 / Math.max(1, pieces.length));
       sourceText = pieces.map(function (p) { return p.slice(0, each); }).join("\n\n");
-      if (firstItem) {
+      // The quiz comes ONLY from the topic(s) just taught. The unit's objectives and assignment are
+      // used only when the caller asks for a whole-unit quiz (wholeUnit: true).
+      if (firstItem && req.body.wholeUnit === true) {
         outcomesText = specialText(doc, firstItem.ownerId, "outcomes", 1500);
         practiceText = specialText(doc, firstItem.ownerId, "exercise", 3500);
       }
