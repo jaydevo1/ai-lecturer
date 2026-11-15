@@ -19,13 +19,22 @@ const SERVER_URL = IS_LOCAL ? "http://127.0.0.1:3000" : ONLINE_SERVER_URL;
 const ACCESS_CODE_KEY = "accessCode";
 const PREFS_KEY = "lecturerPrefs";
 
-// Used when nothing is saved yet. Exam mode is the default because
-// NOUN exams reward the exact wording of the course material.
-const DEFAULT_PREFS = { level: "University", difficulty: "Standard", approach: "exam" };
+// Used when nothing is saved yet. Revision mode is the default: quick key points for exam study.
+// (Exam mode = full detail in the material's exact wording; Explain = teaches freely.)
+const DEFAULT_PREFS = { level: "University", difficulty: "Standard", approach: "revision" };
+
+// The three approaches, shown as buttons instead of a drop-down so nobody forgets they exist
+const APPROACHES = [
+  { value: "revision", name: "Revision", note: "Quick: the main short definition and the key points only. Best for revising before an exam. Switch to Study mode for full detail." },
+  { value: "exam", name: "Study Mode", note: "Full detail in your material's exact wording, with explanations and examples." },
+  { value: "explain", name: "Explain", note: "Teaches freely in new words, to help you understand." }
+];
 
 function loadPrefs() {
   try {
     const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
+    // Choices saved before Revision mode existed: start again from the new default approach
+    if (saved.approachV !== 2) delete saved.approach;
     return Object.assign({}, DEFAULT_PREFS, saved);
   } catch (error) {
     return Object.assign({}, DEFAULT_PREFS);   // storage blocked or broken: use defaults
@@ -34,7 +43,7 @@ function loadPrefs() {
 
 function savePrefs(prefs) {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    localStorage.setItem(PREFS_KEY, JSON.stringify(Object.assign({}, prefs, { approachV: 2 })));
   } catch (error) {
     // not saving is fine, the page still works
   }
@@ -43,6 +52,15 @@ function savePrefs(prefs) {
 // Connects the three <select> boxes to the saved preferences.
 // Returns a function that reads the current choices.
 function bindPrefs(levelEl, difficultyEl, approachEl) {
+  // the hidden <select> always holds the three approaches, whatever the page's HTML lists
+  approachEl.innerHTML = "";
+  APPROACHES.forEach(function (a) {
+    const option = document.createElement("option");
+    option.value = a.value;
+    option.textContent = a.name;
+    approachEl.append(option);
+  });
+
   const prefs = loadPrefs();
   levelEl.value = prefs.level;
   difficultyEl.value = prefs.difficulty;
@@ -54,7 +72,48 @@ function bindPrefs(levelEl, difficultyEl, approachEl) {
   [levelEl, difficultyEl, approachEl].forEach(function (el) {
     el.addEventListener("change", function () { savePrefs(read()); });
   });
+  buildApproachPicker(approachEl);
   return read;
+}
+
+// Three visible buttons (one highlighted) that control the hidden approach <select>
+function buildApproachPicker(selectEl) {
+  selectEl.hidden = true;
+  const picker = document.createElement("div");
+  picker.className = "approach-picker";
+  picker.setAttribute("role", "radiogroup");
+  picker.setAttribute("aria-label", "Approach");
+  const note = document.createElement("p");
+  note.className = "approach-note";
+
+  function refresh() {
+    picker.querySelectorAll(".approach-btn").forEach(function (btn) {
+      const on = btn.dataset.value === selectEl.value;
+      btn.classList.toggle("is-on", on);
+      btn.setAttribute("aria-checked", on ? "true" : "false");
+    });
+    const current = APPROACHES.find(function (a) { return a.value === selectEl.value; });
+    note.textContent = current ? current.note : "";
+  }
+
+  APPROACHES.forEach(function (a) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "approach-btn";
+    btn.dataset.value = a.value;
+    btn.setAttribute("role", "radio");
+    btn.textContent = a.name;
+    btn.addEventListener("click", function () {
+      selectEl.value = a.value;
+      selectEl.dispatchEvent(new Event("change", { bubbles: true }));   // saves the choice
+      refresh();
+    });
+    picker.append(btn);
+  });
+
+  selectEl.insertAdjacentElement("afterend", picker);
+  picker.insertAdjacentElement("afterend", note);
+  refresh();
 }
 
 // fetch() for our server. It adds the access code, and if the server asks for the

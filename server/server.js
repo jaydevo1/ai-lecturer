@@ -219,12 +219,51 @@ EXAM MODE (NOUN exam preparation). The learner will be examined on the EXACT wor
 - Any goals or recap taken from the document use the document's wording too.
 `;
 
+// REVISION MODE: a fast refresher before an exam. It keeps only the most important part of each point
+// (the short main definition, the items of a list) in the material's own words, and moves on.
+const REVISION_PROMPT = `
+You are an excellent university lecturer giving a fast REVISION lesson. The learner has already studied this material and wants to refresh the key points quickly before an exam. This is NOT a full lesson: do not teach everything, pick the most important parts and move on.
+
+Go through the topic in the material's order. For each concept:
+- DEFINITION: give only the ONE short main definition, the shortest sentence in the material that really defines the term, in the material's own words. Leave out the long explanation, the history and the extra detail around it.
+- LISTS (types, components, characteristics, advantages, disadvantages, steps, sizes): name the list, then say every item in the material's own words. At most a few words about each item. Never explain each item at length.
+- FORMULAS: state the formula and one short line on what it is used for.
+- You may add ONE short memory hook, such as "Think of it like a ...", only for a point that is hard to remember. Mark that segment source "added". Do not add a hook to every point.
+- Skip background, repeated explanation, long examples and small details. Never skip a term, definition or list that an exam could ask for.
+- Teach naturally, like a lecturer. NEVER say "your material says", "the document says" or "according to the text". Do not ask the learner questions. Never say the same thing twice.
+- Match the vocabulary to the learner's level and teaching difficulty.
+
+Each segment has:
+- "speech": what you say out loud. 2 to 4 short sentences, 25 to 55 words. Natural spoken English, no bullet points, no symbols that are hard to say aloud.
+- "subtitle": a very short version of the point (under 12 words).
+- "source": "document" if the content comes directly from the material, "added" if it is your own memory hook. Do not invent facts about the course.
+- "quote": for a segment where you state a definition or a list item from the material, set "quote" to that ONE sentence copied CHARACTER FOR CHARACTER from the material (at most 60 words) and say exactly that sentence in "speech". The quote is only used by the server to check accuracy; the learner never sees it. If you cannot copy it exactly, leave it empty.
+- "board": what appears on the board while you speak. Choose one type:
+    "title": opening or section title. Fields: tag, heading, text.
+    "definition": a key term. Fields: tag (use "Definition"), heading (the term), text (the short definition, in the material's words).
+    "diagram": a simple tree. Fields: tag, heading, root (parent box), children (2 to 4 short labels), highlight (index of the child you are explaining, or -1).
+    "list": items to remember. Fields: tag, heading, items (2 to 6 short lines, the material's own wording).
+
+Open and close the lesson exactly as the LESSON POSITION RULES in the request say. Keep every board line short.
+`;
+
+// The three teaching approaches. Anything else (or nothing) means "revision", the default.
+function normApproach(value) {
+  return value === "exam" || value === "explain" ? value : "revision";
+}
+
 function buildSystemInstruction(approach) {
+  if (approach === "revision") return REVISION_PROMPT;
   return approach === "exam" ? TEACHING_PROMPT + EXAM_RULES : TEACHING_PROMPT;
 }
 
 // Short text gets a shorter lesson (faster). Exam mode needs more segments to cover everything.
 function segmentRange(textLength, approach) {
+  if (approach === "revision") {
+    // revision: about one segment per concept, roughly one per 650 characters of material
+    const wanted = Math.min(12, Math.max(4, Math.round(textLength / 650)));
+    return wanted + " to " + (wanted + 3);
+  }
   // enough segments to cover every point: about one per 330 characters of material (exam) or 420 (explain)
   const per = approach === "exam" ? 330 : 420;
   const target = Math.min(24, Math.max(8, Math.round(textLength / per)));
@@ -1363,7 +1402,7 @@ app.get("/api/doc/:id", function (req, res) {
 app.post("/api/lesson", async function (req, res) {
   const level = String(req.body.level || "University");
   const difficulty = String(req.body.difficulty || "Standard");
-  const approach = req.body.approach === "exam" ? "exam" : "explain";
+  const approach = normApproach(req.body.approach);
   // A unit is taught as a chain of topic lessons: "first", "middle", "last" (or "only" for a single lesson)
   const position = ["first", "middle", "last"].includes(req.body.position) ? req.body.position : "only";
 
@@ -1618,7 +1657,7 @@ function cleanQuiz(raw) {
 app.post("/api/quiz", async function (req, res) {
   const level = String(req.body.level || "University");
   const difficulty = String(req.body.difficulty || "Standard");
-  const approach = req.body.approach === "exam" ? "exam" : "explain";
+  const approach = normApproach(req.body.approach);
   const round = Math.max(0, Math.min(Number(req.body.round) || 0, 50));
   const lessonTitle = String(req.body.lessonTitle || "").slice(0, 200);
 
@@ -1664,7 +1703,7 @@ app.post("/api/quiz", async function (req, res) {
   const prompt =
     "Learner level: " + level + "\nDifficulty: " + difficulty + "\nLesson: " + lessonTitle + "\n" +
     "Write " + count + " questions." + (round > 0 ? " This is attempt " + (round + 1) + ": ask DIFFERENT questions from a typical first quiz, covering other details." : "") +
-    (approach === "exam" ? " Exam style: prefer questions on exact definitions, terms and lists in the material." : "") +
+    (approach === "exam" || approach === "revision" ? " Exam style: prefer questions on exact definitions, terms and lists in the material." : "") +
     (outcomesText ? '\n\nLearning outcomes of this unit (the quiz must cover them):\n"""\n' + outcomesText + '\n"""' : "") +
     (practiceText ? '\n\nPractice questions and solutions from the material (use them as extra source material; adapt them, do not copy them blindly):\n"""\n' + practiceText + '\n"""' : "") +
     '\n\nStudy material:\n"""\n' + sourceText + '\n"""';

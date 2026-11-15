@@ -128,3 +128,16 @@ details[open] > summary::before { content: "\25BE"; }
 .leaf.is-done { background: #f1eee6; border-color: #e0d9c8; }
 .leaf.is-done .leaf-title { color: var(--muted); }
 .done-tag { color: #2f7a4a; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
+
+
+/* ---------- Approach buttons (Revision / Exam mode / Explain) ---------- */
+select[hidden] { display: none; }
+.approach-field { margin-top: 12px; }
+.approach-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+.approach-btn {
+  flex: 1; min-width: 96px; min-height: 44px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
+}
+.approach-btn.is-on { background: var(--board); color: #fff; border-color: var(--board); }
+.approach-note { font-size: 0.8rem; color: var(--muted); margin-top: 6px; line-height: 1.4; }
