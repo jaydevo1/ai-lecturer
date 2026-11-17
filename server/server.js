@@ -66,7 +66,7 @@ const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "cache");   // s
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "docs");      // uploaded documents
 
 // Change this word when the teaching prompt changes, so old saved lessons are not reused
-const PROMPT_VERSION = "v8";
+const PROMPT_VERSION = "v9";
 
 // Online use: a secret code that friends must type, and a daily limit per person,
 // so nobody can use up the free Gemini allowance. If ACCESS_CODE is empty (your own computer), the code is not asked.
@@ -140,7 +140,7 @@ const LESSON_SCHEMA = {
           board: {
             type: "OBJECT",
             properties: {
-              type:      { type: "STRING", enum: ["title", "definition", "diagram", "list", "formula", "steps", "table", "note", "code"] },
+              type:      { type: "STRING", enum: ["title", "definition", "diagram", "list", "formula", "steps", "table", "note", "code", "drawing"] },
               tag:       { type: "STRING" },
               heading:   { type: "STRING" },
               text:      { type: "STRING" },
@@ -149,6 +149,7 @@ const LESSON_SCHEMA = {
               highlight: { type: "INTEGER" },
               items:     { type: "ARRAY", items: { type: "STRING" } },
               latex:     { type: "STRING" },
+              svg:       { type: "STRING" },
               columns:   { type: "ARRAY", items: { type: "STRING" } },
               rows:      { type: "ARRAY", items: { type: "STRING" } }
             },
@@ -280,14 +281,32 @@ MATHS, SCIENCE, TABLES AND CODE (apply whenever the topic has formulas, equation
 - If the topic has no maths, tables or code, ignore this section and use the normal board types.
 `;
 
+// DRAWINGS: the AI draws a simple picture as SVG; sanitizeSvg() below makes sure only safe shapes get through.
+const DRAWING_RULES = `
+
+DRAWINGS (physics, electronics, biology, geography, networks, flowcharts, any idea that is easier to see than to say):
+- Board type "drawing": Fields: tag (use "Diagram"), heading, svg (the picture as SVG code), text (one short caption).
+- Use a drawing whenever the topic is about something with a shape or layout: electric or magnetic field lines, charges, circuits, forces and vectors, waves, rays and lenses, graphs, apparatus, cells, maps, computer networks, flowcharts, block diagrams. A line like [Figure: ...] in the study material describes such a picture: draw it. Use the older "diagram" tree only for simple parent-and-children lists.
+- SVG rules (very important):
+    * Start with <svg viewBox="0 0 400 260"> and end with </svg>. Everything must fit inside 400 by 260.
+    * Use ONLY these tags: svg, g, defs, marker, line, path, circle, ellipse, rect, polygon, polyline, text, tspan. No style, script, image or links.
+    * The board is dark. Draw with light colours: white #f4f1e8, blue #4f8cff, yellow #f2c14e, red #ff6b6b, green #4fc88c. Lines stroke-width="2", fill="none" unless a shape is filled.
+    * Arrowheads: define ONCE <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f4f1e8"/></marker></defs> and use marker-end="url(#arr)" on lines and paths.
+    * Label every important part with <text font-size="14" fill="#f4f1e8">. Text must not overlap lines or other text. Never use text smaller than 12.
+    * Keep it simple and clean: at most about 40 shapes. Make it scientifically correct (electric field lines leave a positive charge and enter a negative one; magnetic field lines leave the north pole and enter the south pole; current flows from the positive terminal; show units and directions with arrows).
+- Example, the field of a positive point charge:
+  <svg viewBox="0 0 400 260"><defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#f4f1e8"/></marker></defs><circle cx="200" cy="130" r="14" fill="#ff6b6b"/><text x="200" y="135" font-size="16" text-anchor="middle" fill="#ffffff">+</text><line x1="214" y1="130" x2="320" y2="130" stroke="#f4f1e8" stroke-width="2" marker-end="url(#arr)"/><line x1="186" y1="130" x2="80" y2="130" stroke="#f4f1e8" stroke-width="2" marker-end="url(#arr)"/><line x1="200" y1="116" x2="200" y2="30" stroke="#f4f1e8" stroke-width="2" marker-end="url(#arr)"/><line x1="200" y1="144" x2="200" y2="230" stroke="#f4f1e8" stroke-width="2" marker-end="url(#arr)"/><text x="330" y="125" font-size="14" fill="#f2c14e">field lines point outwards</text></svg>
+- While you speak about a drawing, point at its labelled parts ("the arrows show the direction a positive test charge would move"). Never read the SVG code aloud.
+`;
+
 // The three teaching approaches. Anything else (or nothing) means "revision", the default.
 function normApproach(value) {
   return value === "exam" || value === "explain" ? value : "revision";
 }
 
 function buildSystemInstruction(approach) {
-  if (approach === "revision") return REVISION_PROMPT + MATH_RULES;
-  return (approach === "exam" ? TEACHING_PROMPT + EXAM_RULES : TEACHING_PROMPT) + MATH_RULES;
+  if (approach === "revision") return REVISION_PROMPT + MATH_RULES + DRAWING_RULES;
+  return (approach === "exam" ? TEACHING_PROMPT + EXAM_RULES : TEACHING_PROMPT) + MATH_RULES + DRAWING_RULES;
 }
 
 // Short text gets a shorter lesson (faster). Exam mode needs more segments to cover everything.
@@ -675,7 +694,92 @@ function quoteIsInSource(quote, sourceWords) {
    NEVER trust AI output blindly: fix or drop bad data, and remove
    any "exact quote" that is not really in the source text.
    --------------------------------------------------------- */
-const ALLOWED_BOARD_TYPES = ["title", "definition", "diagram", "list", "formula", "steps", "table", "note", "code"];
+const ALLOWED_BOARD_TYPES = ["title", "definition", "diagram", "list", "formula", "steps", "table", "note", "code", "drawing"];
+
+/* ---------------------------------------------------------
+   SAFE DRAWINGS: the AI writes SVG, but we never pass its code straight to the browser.
+   We read it tag by tag and rebuild it from scratch, keeping only drawing shapes and plain
+   drawing attributes. Scripts, styles, images, links, event handlers and odd values are dropped.
+   --------------------------------------------------------- */
+const SVG_TAGS = ["svg", "g", "defs", "marker", "line", "path", "circle", "ellipse", "rect", "polygon", "polyline", "text", "tspan"];
+const SVG_SHAPES = ["line", "path", "circle", "ellipse", "rect", "polygon", "polyline"];
+const SVG_ATTRS = ["viewBox", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height", "d", "points", "fill", "stroke",
+  "stroke-width", "stroke-dasharray", "stroke-linecap", "stroke-linejoin", "opacity", "fill-opacity", "stroke-opacity", "transform", "font-size",
+  "font-family", "font-weight", "font-style", "text-anchor", "dominant-baseline", "marker-end", "marker-start", "id", "markerWidth", "markerHeight",
+  "refX", "refY", "orient", "markerUnits", "dx", "dy"];
+const SVG_ATTR_LOOKUP = {};
+SVG_ATTRS.forEach(function (a) { SVG_ATTR_LOOKUP[a.toLowerCase()] = a; });
+
+function escapeSvgText(t) {
+  return t.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/[<>&"']/g, function (c) { return { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" }[c]; });
+}
+
+function sanitizeSvg(raw) {
+  let src = String(raw || "").trim();
+  if (!src || src.length > 14000) return "";
+  src = src.replace(/<!--[\s\S]*?-->/g, "").replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "")
+    .replace(/<(script|style|foreignObject|iframe|object|embed|image|use|a|animate|animateTransform|set)\b[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<(script|style|foreignObject|iframe|object|embed|image|use|a|animate|animateTransform|set)\b[^>]*>/gi, "");
+
+  const out = [];
+  const stack = [];
+  let sawSvg = false;
+  let shapes = 0;
+  let count = 0;
+  const re = /<\s*(\/?)\s*([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)\s*>|([^<]+)/g;
+  let m;
+  while ((m = re.exec(src))) {
+    if (m[5] !== undefined) {                                   // text between tags
+      if (stack.length && /^(text|tspan)$/.test(stack[stack.length - 1])) out.push(escapeSvgText(m[5]));
+      continue;
+    }
+    const closing = m[1] === "/";
+    const name = m[2].toLowerCase();
+    if (SVG_TAGS.indexOf(name) === -1) continue;
+    if (!sawSvg && name !== "svg") continue;
+    if (closing) {
+      if (stack.length && stack[stack.length - 1] === name) { out.push("</" + name + ">"); stack.pop(); }
+      continue;
+    }
+    if (name === "svg" && sawSvg) continue;
+    if (++count > 160) return "";
+
+    const attrs = {};
+    const attrRe = /([a-zA-Z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+    let a;
+    while ((a = attrRe.exec(m[3]))) {
+      const canon = SVG_ATTR_LOOKUP[a[1].toLowerCase()];
+      if (!canon) continue;
+      const value = String(a[2] !== undefined ? a[2] : a[3]).trim();
+      if (value.length > 1500) continue;
+      if (/[<>]|javascript:|data:|expression\s*\(|&#|@import/i.test(value)) continue;
+      if (/url\s*\(/i.test(value) && !/^url\(#[\w-]+\)$/.test(value)) continue;
+      attrs[canon] = value;
+    }
+
+    if (name === "svg") {
+      sawSvg = true;
+      delete attrs.width; delete attrs.height;
+      if (!attrs.viewBox || !/^[\d.\s-]+$/.test(attrs.viewBox)) attrs.viewBox = "0 0 400 260";
+      attrs.xmlns = "http://www.w3.org/2000/svg";
+      attrs.preserveAspectRatio = "xMidYMid meet";
+    }
+    // Defaults so nothing is invisible on the dark board
+    if (name === "text" || name === "tspan") { if (!attrs.fill) attrs.fill = "#f4f1e8"; }
+    if (["line", "polyline", "path"].indexOf(name) !== -1 && !attrs.stroke && !attrs.fill) attrs.stroke = "#f4f1e8";
+    if (["path", "polygon", "polyline", "rect", "circle", "ellipse"].indexOf(name) !== -1 && !attrs.fill) attrs.fill = "none";
+    if (SVG_SHAPES.indexOf(name) !== -1) shapes++;
+
+    const attrText = Object.keys(attrs).map(function (k) { return " " + k + '="' + attrs[k].replace(/"/g, "&quot;") + '"'; }).join("");
+    const selfClose = m[4] === "/";
+    out.push("<" + name + attrText + (selfClose ? "/>" : ">"));
+    if (!selfClose) stack.push(name);
+  }
+  while (stack.length) out.push("</" + stack.pop() + ">");
+  if (!sawSvg || shapes === 0) return "";
+  return out.join("");
+}
 
 // Safety net: if the AI left LaTeX in the spoken text, turn it into words so the voice never says "backslash frac"
 function speakable(text) {
@@ -715,7 +819,9 @@ function cleanLesson(raw, sourceText) {
     speech = speakable(stripNumbering(speech, true));
 
     const board = seg.board || {};
-    const type = ALLOWED_BOARD_TYPES.includes(board.type) ? board.type : "definition";
+    let type = ALLOWED_BOARD_TYPES.includes(board.type) ? board.type : "definition";
+    const svg = type === "drawing" ? sanitizeSvg(board.svg) : "";
+    if (type === "drawing" && !svg) type = "definition";      // the picture was unusable: show it as a normal definition card
     const subtitle = speakable(stripNumbering(String(seg.subtitle || "").trim() || speech.slice(0, 90), true));
     const quote = "";      // quotes are no longer used: the lecturer teaches, it does not read
 
@@ -733,6 +839,7 @@ function cleanLesson(raw, sourceText) {
         children: Array.isArray(board.children) ? board.children.map(String) : [],
         highlight: Number.isInteger(board.highlight) ? board.highlight : -1,
         items: Array.isArray(board.items) ? board.items.map(function (x) { return stripNumbering(x); }) : [],
+        svg: svg,
         latex: String(board.latex || "").replace(/^\s*\$+|\$+\s*$/g, "").trim(),
         columns: Array.isArray(board.columns) ? board.columns.map(String) : [],
         rows: Array.isArray(board.rows) ? board.rows.map(String) : []
@@ -1765,7 +1872,7 @@ const ASK_MODES = {
   simpler: "The learner did not understand. Do NOT repeat the earlier explanation. Re-teach it much more simply: plain everyday words, shorter sentences, one real-life analogy.",
   example: "The learner wants another example. Give one new, concrete example that is different from any example already used.",
   reteach: "The learner answered a quiz question wrongly. Teach the underlying idea again in a DIFFERENT way from the original lesson (a new analogy or a step-by-step breakdown). Then say briefly what the correct answer is and why. Be encouraging.",
-  diagram: "The learner wants a picture. Use a board of type \"diagram\" (root + children) or \"list\" that shows the idea visually, and explain it while pointing at it."
+  diagram: "The learner wants a picture. Draw it: use a board of type \"drawing\" (an SVG picture, see the DRAWINGS rules) whenever the idea has a shape, layout or flow; use \"diagram\" (root + children) or \"list\" only for simple groupings. Explain it while pointing at its labelled parts."
 };
 
 const ASK_PROMPT = `
@@ -1822,7 +1929,7 @@ app.post("/api/ask", async function (req, res) {
 
   try {
     const out = await runWithFallback({
-      systemText: TEACHING_PROMPT + ASK_PROMPT + MATH_RULES,
+      systemText: TEACHING_PROMPT + ASK_PROMPT + MATH_RULES + DRAWING_RULES,
       parts: [{ text: prompt }],
       schema: ASK_SCHEMA,
       temperature: 0.7

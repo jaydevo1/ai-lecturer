@@ -259,6 +259,18 @@ function renderBoard(segment) {
     boardContentEl.append(wrap);
   }
 
+  if (board.type === "drawing" && board.svg) {
+    // The server already rebuilt this SVG from safe parts only; we check once more before showing it
+    const frame = makeEl("div", "board-drawing");
+    if (/<script|\son\w+\s*=|javascript:/i.test(board.svg)) {
+      frame.textContent = board.text || "";
+    } else {
+      frame.innerHTML = board.svg;
+    }
+    boardContentEl.append(frame);
+    if (board.text) boardContentEl.append(makeEl("p", "board-caption", board.text));
+  }
+
   if (board.type === "note") {
     boardContentEl.append(makeEl("p", "board-note", board.text));
   }
@@ -774,6 +786,81 @@ askForm.addEventListener("submit", function (event) {
   askInput.value = "";
   askLecturer("ask", question);
 });
+
+/* ---------------------------------------------------------
+   SPEAK YOUR QUESTION (free: the browser's built-in speech recognition)
+   Tap the mic, talk, and your words appear in the question box. Nothing is sent until you press Ask,
+   so you can correct any word the computer got wrong. Works in Chrome and Edge (needs internet);
+   on browsers that cannot do it, the mic button is hidden.
+   --------------------------------------------------------- */
+const btnMic = document.getElementById("btnMic");
+const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+const normalPlaceholder = askInput.placeholder;
+let recognizer = null;
+let listening = false;
+
+function micMessage(text) {
+  askInput.placeholder = text;
+  setTimeout(function () { if (!listening) askInput.placeholder = normalPlaceholder; }, 4000);
+}
+
+function stopListening() {
+  if (recognizer) { try { recognizer.stop(); } catch (error) { /* already stopped */ } }
+}
+
+function startListening() {
+  // The lecturer must be quiet, or the microphone would hear him instead of you
+  if (isPlaying) togglePlay();
+
+  const startText = askInput.value.trim();
+  recognizer = new SpeechRecognitionClass();
+  recognizer.lang = "en-NG";
+  recognizer.interimResults = true;
+  recognizer.continuous = false;
+
+  recognizer.onstart = function () {
+    listening = true;
+    btnMic.classList.add("is-listening");
+    btnMic.setAttribute("aria-label", "Stop listening");
+    askInput.placeholder = "Listening... speak now";
+  };
+
+  recognizer.onresult = function (event) {
+    let heard = "";
+    for (let i = 0; i < event.results.length; i++) heard += event.results[i][0].transcript;
+    askInput.value = (startText ? startText + " " : "") + heard.trim();
+  };
+
+  recognizer.onerror = function (event) {
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      micMessage("The microphone is blocked. Allow it for this site in your browser, then try again.");
+    } else if (event.error === "no-speech") {
+      micMessage("I did not hear anything. Tap the mic and try again.");
+    } else if (event.error === "network") {
+      micMessage("Voice typing needs the internet. Check your connection.");
+    } else if (event.error !== "aborted") {
+      micMessage("Voice typing did not work. You can still type your question.");
+    }
+  };
+
+  recognizer.onend = function () {
+    listening = false;
+    btnMic.classList.remove("is-listening");
+    btnMic.setAttribute("aria-label", "Speak your question");
+    if (askInput.placeholder === "Listening... speak now") askInput.placeholder = normalPlaceholder;
+    askInput.focus();                 // the text is ready to read, fix and send
+  };
+
+  try { recognizer.start(); } catch (error) { micMessage("Voice typing could not start. Try again."); }
+}
+
+if (!SpeechRecognitionClass) {
+  btnMic.hidden = true;
+} else {
+  btnMic.addEventListener("click", function () {
+    if (listening) stopListening(); else startListening();
+  });
+}
 
 // The quick buttons. Each one is marked in the HTML with data-mode="simpler" etc.
 chips.forEach(function (chip) {

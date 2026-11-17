@@ -180,6 +180,9 @@
         type="text"
         placeholder="Ask a question or say you don't understand..."
         autocomplete="off">
+      <!-- Speak the question: the words appear in the box above so you can fix them before pressing Ask.
+           player.js hides this button on browsers that cannot listen. -->
+      <button class="btn btn-mic" id="btnMic" type="button" aria-label="Speak your question" title="Speak your question">&#127908;</button>
       <button class="btn btn-primary" type="submit">Ask</button>
     </form>
 
