@@ -93,7 +93,7 @@ input[type="file"] {
 #savedCard[hidden] { display: none; }
 
 
-/* ---------- Approach buttons (Revision / Exam mode / Explain) ---------- */
+/* ---------- Approach buttons (Revision / Study mode / Explain) ---------- */
 select[hidden] { display: none; }
 .approach-field { margin-top: 12px; }
 .approach-picker { display: flex; gap: 6px; flex-wrap: wrap; }

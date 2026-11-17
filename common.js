@@ -20,14 +20,14 @@ const ACCESS_CODE_KEY = "accessCode";
 const PREFS_KEY = "lecturerPrefs";
 
 // Used when nothing is saved yet. Revision mode is the default: quick key points for exam study.
-// (Exam mode = full detail in the material's exact wording; Explain = teaches freely.)
+// (Study mode (value "exam") = full detail in the material's exact wording; Explain = teaches freely.)
 const DEFAULT_PREFS = { level: "University", difficulty: "Standard", approach: "revision" };
 
 // The three approaches, shown as buttons instead of a drop-down so nobody forgets they exist
 const APPROACHES = [
   { value: "revision", name: "Revision", note: "Quick: the main short definition and the key points only. Best for revising before an exam. Switch to Study mode for full detail." },
-  { value: "exam", name: "Study Mode", note: "Full detail in your material's exact wording, with explanations and examples." },
-  { value: "explain", name: "Explain", note: "Teaches freely in new words, to help you understand." }
+  { value: "exam", name: "Study mode", note: "Full class: every definition, type and feature taught once, in a natural way, with examples. Best for learning a topic properly." },
+  { value: "explain", name: "Explain", note: "Teaches more freely with extra analogies and everyday examples, to help you really understand." }
 ];
 
 function loadPrefs() {

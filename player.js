@@ -221,6 +221,72 @@ function renderBoard(segment) {
     boardContentEl.append(list);
   }
 
+  // ---- maths, tables, notes and code ----
+  if (board.type === "formula") {
+    if (board.latex) {
+      // KaTeX draws it big and centred ($$ ... $$ is "display" maths)
+      boardContentEl.append(makeEl("div", "board-formula", "$$" + board.latex + "$$"));
+    }
+    if (board.text) boardContentEl.append(makeEl("p", "board-text", board.text));
+  }
+
+  if (board.type === "steps") {
+    // The same steps stay on the board across segments; "highlight" says which step we are on.
+    // Steps after the current one are hidden, so the solution builds up while the lecturer explains.
+    const steps = makeEl("ol", "board-steps");
+    board.items.forEach(function (item, index) {
+      if (board.highlight >= 0 && index > board.highlight) return;
+      const li = makeEl("li", index === board.highlight ? "step-now" : "step-done", item);
+      steps.append(li);
+    });
+    boardContentEl.append(steps);
+  }
+
+  if (board.type === "table") {
+    const table = makeEl("table", "board-table");
+    if (board.columns && board.columns.length) {
+      const head = makeEl("tr", "");
+      board.columns.forEach(function (c) { head.append(makeEl("th", "", c)); });
+      table.append(head);
+    }
+    (board.rows || []).forEach(function (row) {
+      const tr = makeEl("tr", "");
+      row.split("|").forEach(function (cell) { tr.append(makeEl("td", "", cell.trim())); });
+      table.append(tr);
+    });
+    const wrap = makeEl("div", "board-table-wrap");
+    wrap.append(table);
+    boardContentEl.append(wrap);
+  }
+
+  if (board.type === "note") {
+    boardContentEl.append(makeEl("p", "board-note", board.text));
+  }
+
+  if (board.type === "code") {
+    boardContentEl.append(makeEl("pre", "board-code", board.text));
+  }
+
+  renderMath(boardContentEl);
+}
+
+// Turn $...$ and $$...$$ on the board into real equations. KaTeX loads a moment after the page,
+// so if it is not ready yet we try again a few times. If it never loads, the plain text stays.
+function renderMath(element, attempt) {
+  attempt = attempt || 0;
+  if (typeof window.renderMathInElement === "function") {
+    try {
+      window.renderMathInElement(element, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false }
+        ],
+        throwOnError: false
+      });
+    } catch (error) { /* leave the plain text */ }
+    return;
+  }
+  if (attempt < 20) setTimeout(function () { renderMath(element, attempt + 1); }, 250);
 }
 
 

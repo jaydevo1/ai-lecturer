@@ -57,7 +57,7 @@ const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "cache");   // s
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "docs");      // uploaded documents
 
 // Change this word when the teaching prompt changes, so old saved lessons are not reused
-const PROMPT_VERSION = "v5";
+const PROMPT_VERSION = "v7";
 
 // Online use: a secret code that friends must type, and a daily limit per person,
 // so nobody can use up the free Gemini allowance. If ACCESS_CODE is empty (your own computer), the code is not asked.
@@ -131,14 +131,17 @@ const LESSON_SCHEMA = {
           board: {
             type: "OBJECT",
             properties: {
-              type:      { type: "STRING", enum: ["title", "definition", "diagram", "list"] },
+              type:      { type: "STRING", enum: ["title", "definition", "diagram", "list", "formula", "steps", "table", "note", "code"] },
               tag:       { type: "STRING" },
               heading:   { type: "STRING" },
               text:      { type: "STRING" },
               root:      { type: "STRING" },
               children:  { type: "ARRAY", items: { type: "STRING" } },
               highlight: { type: "INTEGER" },
-              items:     { type: "ARRAY", items: { type: "STRING" } }
+              items:     { type: "ARRAY", items: { type: "STRING" } },
+              latex:     { type: "STRING" },
+              columns:   { type: "ARRAY", items: { type: "STRING" } },
+              rows:      { type: "ARRAY", items: { type: "STRING" } }
             },
             required: ["type", "tag", "heading"]
           }
@@ -192,31 +195,32 @@ COVERAGE (very important): before you write, silently list EVERY definition, ter
 Match depth and vocabulary to the learner's level and teaching difficulty: "Very simple" means short words and many analogies; "Detailed" or "Advanced" means precise terms and deeper reasoning.
 
 Each segment has:
-- "speech": what you say out loud. 3 to 6 sentences, 50 to 90 words. Natural spoken English, no bullet points, no symbols that are hard to say aloud.
+- "speech": what you say out loud. 3 to 6 sentences, 50 to 90 words. Natural spoken English, no bullet points, no symbols that are hard to say aloud. Never read out section numbers such as 3.3.1 or (a). Never say the same point twice.
 - "subtitle": a very short version of the point (under 12 words).
 - "source": "document" if the content comes directly from the material, "added" if it is your own explanation, analogy or example. Never present your additions as if the document said them. Do not invent facts about the course.
-- "quote": (optional) see the quote rules. Leave it as an empty string when it does not apply.
+- "quote": always an empty string.
 - "board": what appears on the board while you speak. Choose one type:
     "title": opening or section title. Fields: tag, heading, text.
     "definition": a key term. Fields: tag (use "Definition"), heading (the term), text (the definition in one short line).
     "diagram": a simple tree. Fields: tag, heading, root (parent box), children (2 to 4 short labels), highlight (index of the child you are explaining, or -1).
     "list": steps or a recap. Fields: tag, heading, items (2 to 5 short lines).
 
+Ignore any introduction, objectives, summary, conclusion, references or assignment text inside the study material; teach only the real content. Never say "your material says" or "the document says".
 Open and close the lesson exactly as the LESSON POSITION RULES in the request say.
 Use the diagram "highlight" across consecutive segments so the board follows what you explain.
 Keep every board line short.
 `;
 
 const EXAM_RULES = `
-EXAM MODE (NOUN exam preparation). The learner will be examined on the EXACT wording of this material, so definitions and lists must come from the material word for word. But you are a lecturer TEACHING, not a reader.
-- Teach naturally, like a real lecturer in a classroom. NEVER say phrases like "your material says", "the material states", "the document says", "according to the text", "as written in your PDF". Just teach.
-- Every definition, key statement and list of types, characteristics, advantages, disadvantages or steps: say it using the material's own words and spellings, built naturally into what you say. For example: "So, what is a computer? A computer is basically defined as a tool or machine used for processing data to give required information." Never rename, reword or simplify a defined term or a list item.
-- After you have said it in the material's words, EXPLAIN it in simple words (different wording, never the same sentence twice) and then give an example or analogy that YOU make up. Segments that are your own explanation or example have source "added". Segments that state the material's definition or list have source "document".
-- Lists: keep the material's order and each item's wording, and teach every item with at least one sentence of explanation.
-- Board: short key points only, in the material's own words (the term as heading, then its definition or its items). Never paste long paragraphs on the board.
-- Cover EVERY definition, characteristic, type, advantage, disadvantage, step, formula and example in the material, in the material's order. Do not skip points.
-- "quote": for each segment where you state a definition, a key sentence or a list item from the material, set "quote" to that ONE sentence copied CHARACTER FOR CHARACTER from the material (at most 60 words) and say exactly that sentence in "speech". The quote is only used by the server to check accuracy: the learner never sees it. If you cannot copy it exactly, leave it empty.
-- Any goals or recap taken from the document use the document's wording too.
+STUDY MODE (thorough, exam-ready teaching). Teach this topic the way a good lecturer teaches a real class: you understand the content and you explain it, you never read it out.
+- Every definition, type, feature, characteristic, advantage, disadvantage, step, formula and rule in the topic text must be taught. The facts and the technical terms come from the topic text and must be correct. Never invent facts and never leave a point out. Keep the course's own term names (a defined term keeps its name) and keep the original order.
+- State each core point ONCE, in clear natural spoken words, then add something new: why it matters, a simple everyday example (a market, a phone, a school, transport), a contrast, or a way to remember it. NEVER say a point and then say the same point again in other words. NEVER copy a sentence from the text and then explain it.
+- Lists: introduce the list in one sentence, for example "There are three types of computer: analog, digital and hybrid." Then explain each item briefly in its own words. NEVER say numbers or letters from the text such as 3.3.1, (a), (i) or "number one" unless the learner needs the number to follow a real sequence of steps.
+- NEVER say "your material says", "the material states", "the document says", "according to the text" or "as written in your PDF". Just teach.
+- Ignore any introduction, objectives, summary, conclusion, references, further reading or assignment text that appears inside the topic text. Teach only the real content.
+- Board: short key points only: the term as heading, then a short definition or the short list items, without numbering. Never paste paragraphs on the board.
+- Mark a segment "document" when it states what the topic text says, and "added" when it is your own example, analogy or hook.
+- Leave "quote" as an empty string.
 `;
 
 // REVISION MODE: a fast refresher before an exam. It keeps only the most important part of each point
@@ -224,27 +228,46 @@ EXAM MODE (NOUN exam preparation). The learner will be examined on the EXACT wor
 const REVISION_PROMPT = `
 You are an excellent university lecturer giving a fast REVISION lesson. The learner has already studied this material and wants to refresh the key points quickly before an exam. This is NOT a full lesson: do not teach everything, pick the most important parts and move on.
 
-Go through the topic in the material's order. For each concept:
-- DEFINITION: give only the ONE short main definition, the shortest sentence in the material that really defines the term, in the material's own words. Leave out the long explanation, the history and the extra detail around it.
-- LISTS (types, components, characteristics, advantages, disadvantages, steps, sizes): name the list, then say every item in the material's own words. At most a few words about each item. Never explain each item at length.
+Go through the topic in the order of the topic text. For each concept:
+- DEFINITION: give only ONE short main definition in your own clear words, faithful to the topic text, keeping the course's term names. Leave out long explanation, history and extra detail.
+- LISTS (types, components, features, advantages, disadvantages, steps, sizes): name the list and say every item naturally in one flowing sentence, for example "The types are analog, digital and hybrid." At most a few words about each item. Never read out numbering such as 3.3.1, (a) or (i).
 - FORMULAS: state the formula and one short line on what it is used for.
-- You may add ONE short memory hook, such as "Think of it like a ...", only for a point that is hard to remember. Mark that segment source "added". Do not add a hook to every point.
+- You may add ONE short memory hook, such as "Think of it like a ...", only for a point that is hard to remember. Mark that segment source "added".
 - Skip background, repeated explanation, long examples and small details. Never skip a term, definition or list that an exam could ask for.
+- Ignore any introduction, objectives, summary, conclusion, references or assignment text that appears inside the topic text.
 - Teach naturally, like a lecturer. NEVER say "your material says", "the document says" or "according to the text". Do not ask the learner questions. Never say the same thing twice.
 - Match the vocabulary to the learner's level and teaching difficulty.
 
 Each segment has:
 - "speech": what you say out loud. 2 to 4 short sentences, 25 to 55 words. Natural spoken English, no bullet points, no symbols that are hard to say aloud.
 - "subtitle": a very short version of the point (under 12 words).
-- "source": "document" if the content comes directly from the material, "added" if it is your own memory hook. Do not invent facts about the course.
-- "quote": for a segment where you state a definition or a list item from the material, set "quote" to that ONE sentence copied CHARACTER FOR CHARACTER from the material (at most 60 words) and say exactly that sentence in "speech". The quote is only used by the server to check accuracy; the learner never sees it. If you cannot copy it exactly, leave it empty.
+- "source": "document" if the content comes from the topic text, "added" if it is your own memory hook. Do not invent facts about the course.
+- "quote": always an empty string.
 - "board": what appears on the board while you speak. Choose one type:
     "title": opening or section title. Fields: tag, heading, text.
-    "definition": a key term. Fields: tag (use "Definition"), heading (the term), text (the short definition, in the material's words).
+    "definition": a key term. Fields: tag (use "Definition"), heading (the term), text (the short definition).
     "diagram": a simple tree. Fields: tag, heading, root (parent box), children (2 to 4 short labels), highlight (index of the child you are explaining, or -1).
-    "list": items to remember. Fields: tag, heading, items (2 to 6 short lines, the material's own wording).
+    "list": items to remember. Fields: tag, heading, items (2 to 6 short lines, no numbering).
 
 Open and close the lesson exactly as the LESSON POSITION RULES in the request say. Keep every board line short.
+`;
+
+// MATHS, TABLES, NOTES, CODE: added to every approach. The board can now show real equations (KaTeX in the browser).
+const MATH_RULES = `
+
+MATHS, SCIENCE, TABLES AND CODE (apply whenever the topic has formulas, equations, calculations, worked examples, comparison tables or program code):
+- Extra board types you may use:
+    "formula": one important formula. Fields: tag (use "Formula"), heading (its name), latex (the formula only, in LaTeX, WITHOUT dollar signs), text (one short line saying what each letter means).
+    "steps": a worked example solved step by step. Fields: tag (use "Worked example"), heading (the problem), items (EVERY step of the solution in order, each one short, showing the working), highlight (index of the step you are explaining right now, starting at 0).
+    "table": a comparison or data table. Fields: tag, heading, columns (short column names), rows (each row is ONE string with its cells separated by " | ").
+    "note": a warning, a tip or a rule of thumb. Fields: tag, heading, text.
+    "code": program code. Fields: tag, heading, text (the code, with line breaks, at most 10 lines).
+- Write mathematics on the board in LaTeX between single dollar signs, inside heading, text, items or rows, for example $F = ma$ or $\\frac{a}{b}$. Chemistry formulas: $\\mathrm{H_2O}$. Do not use dollar signs for money.
+- NEVER put LaTeX, dollar signs, backslashes or symbols such as ^ _ { } in "speech" or "subtitle". Say the maths in words: "F equals m times a", "x squared plus two x", "a over b", "the square root of nine".
+- WORKED EXAMPLES: use the SAME "items" list in consecutive segments and raise "highlight" by one each time, so the board builds the solution while you explain. Each segment speaks only about its own step: what we do and why. Never skip a step. Show the working, then the final answer with its units.
+- Solve every calculation carefully and check the arithmetic and units before you write it. Never guess a number.
+- If the topic text contains a worked example, a table or code, teach that one (steps, table or code board) instead of inventing a different one.
+- If the topic has no maths, tables or code, ignore this section and use the normal board types.
 `;
 
 // The three teaching approaches. Anything else (or nothing) means "revision", the default.
@@ -253,8 +276,8 @@ function normApproach(value) {
 }
 
 function buildSystemInstruction(approach) {
-  if (approach === "revision") return REVISION_PROMPT;
-  return approach === "exam" ? TEACHING_PROMPT + EXAM_RULES : TEACHING_PROMPT;
+  if (approach === "revision") return REVISION_PROMPT + MATH_RULES;
+  return (approach === "exam" ? TEACHING_PROMPT + EXAM_RULES : TEACHING_PROMPT) + MATH_RULES;
 }
 
 // Short text gets a shorter lesson (faster). Exam mode needs more segments to cover everything.
@@ -277,12 +300,12 @@ function positionRules(position) {
   const last = position === "last" || position === "only";
   let r = "LESSON POSITION RULES (these override any other rule about openings and endings):\n";
   if (first) {
-    r += '- Open with ONE short segment of 2 to 3 spoken lines that introduces what we are studying (use the INTRODUCTION text if it is given). Then ONE goals segment: board type "list", tag "Goals", heading "What you will learn", items = the learning goals this lesson covers. Use the LEARNING OUTCOMES text if it is given, keeping its wording and listing only the outcomes that match this lesson. If none are given, write 3 short goals yourself and mark the segment source "added".\n';
+    r += '- Open with ONE short segment of 2 to 3 spoken lines in your own words: welcome the learner and say what this unit is about, using the UNIT and its TOPIC LIST given below. Then ONE goals segment: board type "list", tag "Goals", heading "What you will learn", 3 to 5 short items written by you from the TOPIC LIST and the topic text, each starting with a verb such as "Define", "Identify", "Explain". Mark both segments source "added".\n';
   } else {
     r += "- This lesson continues a unit that is already in progress. Do NOT welcome the learner and do NOT introduce the course again. Begin with one short sentence that names the new topic, then teach it.\n";
   }
   if (last) {
-    r += '- Finish with ONE recap segment: board type "list", tag "Recap", heading "Recap", 2 to 5 items. Base it on the SUMMARY text if it is given (use only the parts that relate to what was taught). If there is no summary, write the recap yourself and mark source "added".\n';
+    r += '- Finish with ONE recap segment: board type "list", tag "Recap", heading "Recap", 2 to 5 items written by you from what you just taught (and, if useful, the TOPIC LIST). Mark it source "added".\n';
   } else {
     r += "- More topics follow this one. Do NOT end with a recap or a goodbye. Finish the topic and stop.\n";
   }
@@ -299,9 +322,9 @@ function buildLessonPrompt(text, level, difficulty, approach, docName, sectionTi
   const first = position === "first" || position === "only";
   const last = position === "last" || position === "only";
   let extra = "";
-  if (first && extras.intro)    extra += 'INTRODUCTION text from the material:\n"""\n' + extras.intro + '\n"""\n\n';
-  if (first && extras.outcomes) extra += 'LEARNING OUTCOMES text from the material:\n"""\n' + extras.outcomes + '\n"""\n\n';
-  if (last && extras.summary)   extra += 'SUMMARY text from the material:\n"""\n' + extras.summary + '\n"""\n\n';
+  if ((first || last) && extras.unitTitle) {
+    extra += "UNIT: " + extras.unitTitle + "\nTOPIC LIST of this unit: " + (extras.topics || []).join("; ") + "\n\n";
+  }
 
   return `
 Learner's educational level: ${level}
@@ -529,7 +552,33 @@ function quoteIsInSource(quote, sourceWords) {
    NEVER trust AI output blindly: fix or drop bad data, and remove
    any "exact quote" that is not really in the source text.
    --------------------------------------------------------- */
-const ALLOWED_BOARD_TYPES = ["title", "definition", "diagram", "list"];
+const ALLOWED_BOARD_TYPES = ["title", "definition", "diagram", "list", "formula", "steps", "table", "note", "code"];
+
+// Safety net: if the AI left LaTeX in the spoken text, turn it into words so the voice never says "backslash frac"
+function speakable(text) {
+  function words(x) {
+    let t = x;
+    for (let i = 0; i < 3; i++) t = t.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "$1 over $2").replace(/\\sqrt\s*\{([^{}]*)\}/g, "the square root of $1");
+    const map = { times: " times ", cdot: " times ", div: " divided by ", pm: " plus or minus ", leq: " less than or equal to ", le: " less than or equal to ",
+      geq: " greater than or equal to ", ge: " greater than or equal to ", neq: " not equal to ", approx: " approximately ", rightarrow: " gives ",
+      to: " goes to ", pi: " pi ", Delta: " delta ", delta: " delta ", theta: " theta ", alpha: " alpha ", beta: " beta ", lambda: " lambda ", mu: " mu ",
+      omega: " omega ", Omega: " ohms ", sum: " the sum of ", infty: " infinity ", degree: " degrees " };
+    t = t.replace(/\\([A-Za-z]+)/g, function (m, name) { return map[name] !== undefined ? map[name] : " "; });
+    t = t.replace(/\^\{?2\}?/g, " squared").replace(/\^\{?3\}?/g, " cubed").replace(/\^\{([^{}]*)\}/g, " to the power $1").replace(/\^(\w)/g, " to the power $1");
+    t = t.replace(/_\{([^{}]*)\}/g, "$1").replace(/_(\w)/g, "$1").replace(/[{}]/g, "");
+    t = t.replace(/=/g, " equals ").replace(/\+/g, " plus ").replace(/\s-\s/g, " minus ");
+    return t.replace(/\s+/g, " ").trim();
+  }
+  return String(text || "").replace(/\$\$?([^$]+)\$\$?/g, function (m, inner) { return words(inner); }).replace(/\$/g, "").replace(/\s{2,}/g, " ").trim();
+}
+
+// Remove section numbers the AI may have copied from the PDF: "3.3.1 Types", "(a) Speed", "(iv) ...", "2. Item"
+function stripNumbering(text, inSpeech) {
+  let t = String(text || "").trim();
+  t = t.replace(/^\(?(?:\d+(?:\.\d+)+|\d{1,2}[.)]|[a-z][.)]|\([a-z]\)|\((?:[ivx]+|\d+)\)|[ivx]+[.)])\s+/i, "");
+  if (inSpeech) t = t.replace(/\b\d+\.\d+(?:\.\d+)+\s*[:.)-]?\s*/g, "");
+  return t.trim();
+}
 
 function cleanLesson(raw, sourceText) {
   const sourceWords = " " + wordsOnly(sourceText) + " ";
@@ -540,26 +589,12 @@ function cleanLesson(raw, sourceText) {
   (raw.segments || []).forEach(function (seg) {
     let speech = String(seg.speech || "").trim();
     if (speech === "") return;
-    let speechFixed = null;
+    speech = speakable(stripNumbering(speech, true));
 
     const board = seg.board || {};
     const type = ALLOWED_BOARD_TYPES.includes(board.type) ? board.type : "definition";
-    const subtitle = String(seg.subtitle || "").trim() || speech.slice(0, 90);
-
-    let quote = String(seg.quote || "").trim();
-    if (quote) {
-      if (quoteIsInSource(quote, sourceWords)) {
-        verified++;
-        // the exact sentence must really be spoken: if the AI paraphrased it, say the exact one first
-        if (!(" " + wordsOnly(speech) + " ").includes(" " + wordsOnly(quote) + " ")) {
-          speechFixed = quote.replace(/\s+/g, " ") + " " + speech;
-        }
-      } else {
-        quote = "";      // not found word for word: never show it as exact
-        removed++;
-      }
-    }
-    if (speechFixed) speech = speechFixed;
+    const subtitle = speakable(stripNumbering(String(seg.subtitle || "").trim() || speech.slice(0, 90), true));
+    const quote = "";      // quotes are no longer used: the lecturer teaches, it does not read
 
     segments.push({
       speech: speech,
@@ -569,12 +604,15 @@ function cleanLesson(raw, sourceText) {
       board: {
         type: type,
         tag: String(board.tag || "Lesson"),
-        heading: String(board.heading || ""),
+        heading: stripNumbering(board.heading || ""),
         text: String(board.text || subtitle),
         root: String(board.root || ""),
         children: Array.isArray(board.children) ? board.children.map(String) : [],
         highlight: Number.isInteger(board.highlight) ? board.highlight : -1,
-        items: Array.isArray(board.items) ? board.items.map(String) : []
+        items: Array.isArray(board.items) ? board.items.map(function (x) { return stripNumbering(x); }) : [],
+        latex: String(board.latex || "").replace(/^\s*\$+|\$+\s*$/g, "").trim(),
+        columns: Array.isArray(board.columns) ? board.columns.map(String) : [],
+        rows: Array.isArray(board.rows) ? board.rows.map(String) : []
       }
     });
   });
@@ -1430,12 +1468,13 @@ app.post("/api/lesson", async function (req, res) {
       part: partIndex, partCount: pieces.length, sectionTitle: sectionTitle, docName: docName, position: position
     };
 
-    // The unit's introduction, learning outcomes and summary (never listed, but used for the opening, goals and recap)
-    const owner = item.ownerId;
+    // Only OUR OWN outline is used as context (unit title and its topic titles).
+    // The PDF's introduction, objectives, summary and assignment text are never given to the lecturer.
+    const ownerItem = doc.items.find(function (i) { return i.id === item.ownerId; });
     extras = {
-      intro:    specialText(doc, owner, "intro", 1500),
-      outcomes: specialText(doc, owner, "outcomes", 1800),
-      summary:  specialText(doc, owner, "summary", 2500)
+      unitTitle: ownerItem ? ownerItem.title : "",
+      topics: doc.items.filter(function (i) { return i.ownerId === item.ownerId && (!i.kind || i.kind === "topic"); })
+        .map(function (i) { return i.title; }).slice(0, 12)
     };
 
     if (sourceText.length < 80) {
@@ -1453,7 +1492,7 @@ app.post("/api/lesson", async function (req, res) {
   }
 
   // Already made this exact lesson (by anyone)? Reuse it for free.
-  const extrasText = [extras.intro, extras.outcomes, extras.summary].join("|");
+  const extrasText = [extras.unitTitle || "", (extras.topics || []).join(";")].join("|");
   const key = cacheKey([level, difficulty, approach, sectionTitle, position, sourceText, extrasText]);
   const saved = readCache(key);
   if (saved) {
@@ -1470,7 +1509,7 @@ app.post("/api/lesson", async function (req, res) {
     });
 
     // Quotes may come from the topic text or from the unit's outcomes / summary text
-    const lesson = cleanLesson(out.result, sourceText + "\n" + (extras.intro || "") + "\n" + (extras.outcomes || "") + "\n" + (extras.summary || ""));
+    const lesson = cleanLesson(out.result, sourceText);
     if (sectionTitle) lesson.title = sectionTitle;
     lesson.approach = approach;
     writeCache(key, lesson);
@@ -1563,7 +1602,7 @@ app.post("/api/ask", async function (req, res) {
 
   try {
     const out = await runWithFallback({
-      systemText: TEACHING_PROMPT + ASK_PROMPT,
+      systemText: TEACHING_PROMPT + ASK_PROMPT + MATH_RULES,
       parts: [{ text: prompt }],
       schema: ASK_SCHEMA,
       temperature: 0.7

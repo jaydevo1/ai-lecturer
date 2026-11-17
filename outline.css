@@ -130,7 +130,7 @@ details[open] > summary::before { content: "\25BE"; }
 .done-tag { color: #2f7a4a; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
 
 
-/* ---------- Approach buttons (Revision / Exam mode / Explain) ---------- */
+/* ---------- Approach buttons (Revision / Study mode / Explain) ---------- */
 select[hidden] { display: none; }
 .approach-field { margin-top: 12px; }
 .approach-picker { display: flex; gap: 6px; flex-wrap: wrap; }

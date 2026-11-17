@@ -529,3 +529,74 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .tile-glow { animation: none !important; }
 }
+
+
+/* =========================================================
+   MATHS, STEPS, TABLES, NOTES, CODE (board types added with KaTeX)
+   ========================================================= */
+.board-formula {
+  font-size: clamp(1.1rem, 5cqw, 2.2rem);
+  text-align: center;
+  padding: 10px 6px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.board-formula .katex-display { margin: 0.2em 0; }
+.board-inner .katex { font-size: 1.05em; }
+
+.board-steps {
+  list-style: none;
+  counter-reset: step;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: clamp(0.9rem, 3.2cqw, 1.35rem);
+}
+.board-steps li {
+  counter-increment: step;
+  position: relative;
+  padding: 5px 8px 5px 34px;
+  border-radius: 8px;
+  opacity: 0.6;
+  overflow-x: auto;
+}
+.board-steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 6px;
+  top: 5px;
+  width: 21px;
+  height: 21px;
+  line-height: 21px;
+  text-align: center;
+  font-size: 0.8em;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+.board-steps li.step-now { opacity: 1; background: rgba(79, 140, 255, 0.22); }
+.board-steps li.step-now::before { background: #4f8cff; color: #fff; }
+
+.board-table-wrap { overflow-x: auto; max-width: 100%; }
+.board-table { border-collapse: collapse; font-size: clamp(0.8rem, 2.8cqw, 1.15rem); width: 100%; }
+.board-table th, .board-table td { border: 1px solid rgba(255, 255, 255, 0.25); padding: 5px 9px; text-align: left; }
+.board-table th { background: rgba(79, 140, 255, 0.25); }
+
+.board-note {
+  font-size: clamp(0.95rem, 3.4cqw, 1.45rem);
+  padding: 10px 14px;
+  border-left: 4px solid #f2c14e;
+  background: rgba(242, 193, 78, 0.12);
+  border-radius: 6px;
+}
+
+.board-code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: clamp(0.78rem, 2.7cqw, 1.1rem);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  white-space: pre;
+  text-align: left;
+}
