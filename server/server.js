@@ -41,6 +41,15 @@ const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS || "")
   .split(",").map(function (n) { return n.trim(); }).filter(Boolean);
 const MODEL_LIST = [MODEL].concat(FALLBACK_MODELS.filter(function (n) { return n !== MODEL; }));
 
+// Optional LAST backup: Groq (free key from console.groq.com). Used only when every Gemini model has failed.
+// Text only: it is skipped for requests that include a PDF or a picture.
+const GROQ_KEY = (process.env.GROQ_API_KEY || "").trim();
+// One model, or several separated by commas (tried in order, each has its own free limit)
+const GROQ_MODELS = (process.env.GROQ_MODELS || process.env.GROQ_MODEL || "openai/gpt-oss-120b")
+  .split(",").map(function (n) { return n.trim(); }).filter(Boolean);
+const GROQ_REASONING = (process.env.GROQ_REASONING === undefined ? "low" : process.env.GROQ_REASONING).trim();   // "low", "medium", "high" or "" to switch off
+const GROQ_URL = process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1/chat/completions";
+
 const TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 60000;     // one try
 const TOTAL_MS = Number(process.env.GEMINI_TOTAL_MS) || 150000;        // all tries for one request
 const BACKOFF_MS = Number(process.env.GEMINI_BACKOFF_MS) || 2000;
@@ -57,7 +66,7 @@ const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "cache");   // s
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "docs");      // uploaded documents
 
 // Change this word when the teaching prompt changes, so old saved lessons are not reused
-const PROMPT_VERSION = "v7";
+const PROMPT_VERSION = "v8";
 
 // Online use: a secret code that friends must type, and a daily limit per person,
 // so nobody can use up the free Gemini allowance. If ACCESS_CODE is empty (your own computer), the code is not asked.
@@ -266,6 +275,7 @@ MATHS, SCIENCE, TABLES AND CODE (apply whenever the topic has formulas, equation
 - NEVER put LaTeX, dollar signs, backslashes or symbols such as ^ _ { } in "speech" or "subtitle". Say the maths in words: "F equals m times a", "x squared plus two x", "a over b", "the square root of nine".
 - WORKED EXAMPLES: use the SAME "items" list in consecutive segments and raise "highlight" by one each time, so the board builds the solution while you explain. Each segment speaks only about its own step: what we do and why. Never skip a step. Show the working, then the final answer with its units.
 - Solve every calculation carefully and check the arithmetic and units before you write it. Never guess a number.
+- A line such as [Figure: ...] describes a picture in the PDF. Teach it with a diagram, table or steps board built from that description. Never say "as you can see in the figure" and never read the word Figure aloud as if the learner could see the page.
 - If the topic text contains a worked example, a table or code, teach that one (steps, table or code board) instead of inventing a different one.
 - If the topic has no maths, tables or code, ignore this section and use the normal board types.
 `;
@@ -355,7 +365,7 @@ Also return courseTitle: the course or document title if you can see it, otherwi
 `;
 
 const TRANSCRIBE_PROMPT = `
-Transcribe ALL the text in these page images exactly as written. Keep headings, numbering and line breaks. Do not summarise, correct, translate or add comments.
+Transcribe ALL the text in these page images exactly as written. Keep headings, numbering and line breaks. Write every equation or formula in LaTeX between single dollar signs, for example $F = ma$. Write every table as rows with the cells separated by " | ". For every picture, diagram or chart write one line like [Figure: what it shows, with its labels and values]. Do not summarise, correct, translate or add comments.
 Start each page with a line "=== PAGE n ===" where n is the image number (1 for the first image). If a page has no readable text, write "[no readable text]" under its marker.
 `;
 
@@ -450,6 +460,94 @@ async function callGemini(model, request, useThinking) {
 
 
 /* ---------------------------------------------------------
+   5b. TALKING TO GROQ (the last backup)
+   Same request shape as callGemini, so the rest of the server does not care which one answered.
+   --------------------------------------------------------- */
+// Our schemas are written the Gemini way ("OBJECT", "STRING"). Groq wants normal JSON schema words.
+function lowerSchema(node) {
+  if (Array.isArray(node)) return node.map(lowerSchema);
+  if (node && typeof node === "object") {
+    const out = {};
+    Object.keys(node).forEach(function (k) {
+      out[k] = (k === "type" && typeof node[k] === "string") ? node[k].toLowerCase() : lowerSchema(node[k]);
+    });
+    return out;
+  }
+  return node;
+}
+
+function canUseGroq(request) {
+  return Boolean(GROQ_KEY) && !request.parts.some(function (part) { return part.inlineData; });
+}
+
+async function callGroq(request, withReasoning, groqModel) {
+  const userText = request.parts.map(function (part) { return part.text || ""; }).join("\n");
+  const messages = [];
+  if (request.systemText) messages.push({ role: "system", content: request.systemText });
+  messages.push({
+    role: "user",
+    content: request.schema
+      ? userText + "\n\nReply with ONLY one JSON object that follows this JSON schema, with no other text:\n" + JSON.stringify(lowerSchema(request.schema))
+      : userText
+  });
+
+  const body = { model: groqModel, messages: messages, temperature: request.temperature === undefined ? 0.6 : request.temperature, max_completion_tokens: 8000 };
+  if (request.schema) body.response_format = { type: "json_object" };
+  if (withReasoning && GROQ_REASONING && /gpt-oss/i.test(groqModel)) body.reasoning_effort = GROQ_REASONING;
+
+  let bodyText;
+  let httpStatus;
+  try {
+    const response = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + GROQ_KEY },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS)
+    });
+    httpStatus = response.status;
+    bodyText = await response.text();
+  } catch (err) {
+    throw makeNetworkError(err);
+  }
+
+  if (httpStatus < 200 || httpStatus >= 300) {
+    const error = new Error("HTTP " + httpStatus);
+    error.details = bodyText.slice(0, 800);
+    if (httpStatus === 400 && /json_validate_failed|failed to generate json/i.test(bodyText)) {
+      error.kind = "badjson";                 // the model wrote broken JSON: just try again
+    } else {
+      error.status = httpStatus;
+    }
+    throw error;
+  }
+
+  let answerText = "";
+  try {
+    const data = JSON.parse(bodyText);
+    answerText = String((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "");
+  } catch (err) {
+    const error = new Error("Groq sent something that is not JSON");
+    error.kind = "badjson";
+    throw error;
+  }
+  answerText = answerText.trim();
+  if (!answerText) {
+    const error = new Error("Groq returned an empty answer");
+    error.kind = "blocked";
+    throw error;
+  }
+  if (!request.schema) return answerText;
+
+  try {
+    return JSON.parse(answerText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, ""));
+  } catch (err) {
+    const error = new Error("the answer came back cut off or broken");
+    error.kind = "badjson";
+    throw error;
+  }
+}
+
+/* ---------------------------------------------------------
    6. RETRIES AND BACKUP MODELS
      "fatal" = our fault (wrong key, bad request): stop.
      "skip"  = this model is not usable now (429 out of free requests, 404 gone): next model.
@@ -481,14 +579,12 @@ async function runWithFallback(request) {
   const failures = [];
   let lastError = null;
 
+  geminiLoop:
   for (const model of MODEL_LIST) {
     let thinkingOn = Boolean(THINKING_LEVEL);
 
     for (let attempt = 1; attempt <= TRIES_PER_MODEL; attempt++) {
-      if (Date.now() - startedAt > TOTAL_MS) {
-        lastError.failures = failures;
-        throw lastError;
-      }
+      if (Date.now() - startedAt > TOTAL_MS) break geminiLoop;     // out of time: Groq (if set) gets its turn
 
       try {
         console.log("[" + model + "] try " + attempt + "/" + TRIES_PER_MODEL + " ...");
@@ -513,6 +609,33 @@ async function runWithFallback(request) {
 
         if (attempt < TRIES_PER_MODEL) {
           await sleep(BACKOFF_MS * Math.pow(2, attempt - 1) * (1 + Math.random() * 0.25));
+        }
+      }
+    }
+  }
+
+  // Every Gemini model failed. If a Groq key is set, try Groq as the last backup.
+  if (canUseGroq(request)) {
+    for (const groqModel of GROQ_MODELS) {
+      let withReasoning = true;
+      for (let attempt = 1; attempt <= TRIES_PER_MODEL; attempt++) {
+        try {
+          console.log("[groq:" + groqModel + "] try " + attempt + "/" + TRIES_PER_MODEL + " (backup) ...");
+          const result = await callGroq(request, withReasoning, groqModel);
+          return { result: result, model: "groq:" + groqModel };
+        } catch (error) {
+          if (error.status === 400 && withReasoning && GROQ_REASONING) {
+            console.log("[groq] does not accept the reasoning setting, trying without it");
+            withReasoning = false;
+            attempt--;
+            continue;
+          }
+          failures.push({ model: "groq:" + groqModel, status: error.status || null, kind: error.kind || null });
+          console.log("[groq:" + groqModel + "] try " + attempt + " failed: " + describe(error));
+          if (!lastError) lastError = error;
+          const action = classify(error);
+          if (action === "fatal" || action === "skip") break;       // this Groq model is not usable now: next one
+          if (attempt < TRIES_PER_MODEL) await sleep(BACKOFF_MS * (1 + Math.random() * 0.25));
         }
       }
     }
@@ -679,6 +802,86 @@ async function transcribeImages(images) {
   // Split by our "=== PAGE n ===" markers; if they are missing, treat it as one page
   const pieces = text.split(/^=== PAGE \d+ ===\s*$/m).map(function (p) { return p.trim(); }).filter(Boolean);
   return pieces.length ? pieces : [text.trim()];
+}
+
+/* ---------------------------------------------------------
+   10b. READING THE REAL PDF PAGES (equations, tables, figures)
+   Plain text extraction loses equations, tables and pictures. For a topic that looks like it has them,
+   we cut out just those pages from the saved PDF, send them to Gemini once, and keep the answer
+   (equations in LaTeX, tables as rows, figures described). The answer is saved, so it is only done once per topic.
+   If anything fails, the lesson simply uses the normal text.
+   --------------------------------------------------------- */
+const READ_PAGES = (process.env.READ_PAGES || "on").toLowerCase() !== "off";
+const MAX_READ_PAGES = Number(process.env.MAX_READ_PAGES) || 6;
+
+const READ_PAGES_PROMPT = `
+These are pages from a university course PDF. Transcribe ONE section of them, exactly as written, in reading order.
+- Equations and formulas: write each one in LaTeX between single dollar signs, for example $v = u + at$ or $\\frac{a}{b}$.
+- Tables: write each row on its own line with the cells separated by " | ", the header row first.
+- Pictures, diagrams, charts and graphs: write one line like [Figure: what it shows, including every label, axis, value and arrow that matters].
+- Keep headings and ordinary text as written. Do not summarise, correct, translate or add comments.
+- Leave out page numbers, running headers and footers.
+`;
+
+// Does this topic text look like it has equations, tables or figures?
+function looksVisual(text) {
+  const t = String(text || "");
+  if (t.length < 200) return false;
+  if ((t.match(/\b(?:fig(?:ure)?s?\.?|table|diagram|chart|graph)\s*\d/gi) || []).length >= 1) return true;
+  const symbols = (t.match(/[=\u00B1\u00D7\u00F7\u221A\u2211\u222B\u2264\u2265\u2260\u2248\u221E\u03C0\u0394\u03B8\u00B2\u00B3\u00BD]/g) || []).length;
+  if (symbols / t.length * 1000 >= 4) return true;
+  const lines = t.split("\n").filter(function (l) { return l.trim() !== ""; });
+  const tiny = lines.filter(function (l) { return l.trim().length <= 3; }).length;
+  return lines.length >= 15 && tiny / lines.length > 0.3;     // broken formula fragments on their own lines
+}
+
+async function slicePdfPages(pdfPath, fromPage, toPage) {
+  let PDFLib;
+  try { PDFLib = require("pdf-lib"); } catch (e) { console.log("Page reading is off: run npm install in the server folder (pdf-lib is missing)."); return null; }
+  const source = await PDFLib.PDFDocument.load(fs.readFileSync(pdfPath), { ignoreEncryption: true });
+  const out = await PDFLib.PDFDocument.create();
+  const wanted = [];
+  for (let p = fromPage; p <= toPage; p++) if (p >= 1 && p <= source.getPageCount()) wanted.push(p - 1);
+  if (wanted.length === 0) return null;
+  const copied = await out.copyPages(source, wanted);
+  copied.forEach(function (page) { out.addPage(page); });
+  return Buffer.from(await out.save());
+}
+
+// Returns the page-read text of this part of a topic, or null (then the normal text is used)
+async function readTopicPages(doc, item, pieceText, sectionTitle) {
+  const pdfPath = path.join(DOCS_DIR, doc.id + ".pdf");
+  if (!fs.existsSync(pdfPath) || !doc.pageStarts) return null;
+
+  const sectionText = doc.text.slice(item.start, item.teachEnd || item.end);
+  const at = Math.max(0, sectionText.indexOf(pieceText.slice(0, 80)));
+  const startOffset = item.start + at;
+  const fromPage = pageOfOffset(doc.pageStarts, startOffset);
+  let toPage = pageOfOffset(doc.pageStarts, Math.max(startOffset, startOffset + pieceText.length - 1));
+  if (toPage - fromPage + 1 > MAX_READ_PAGES) toPage = fromPage + MAX_READ_PAGES - 1;
+
+  const startsWith = pieceText.slice(0, 120).replace(/\s+/g, " ");
+  const endsWith = pieceText.slice(-120).replace(/\s+/g, " ");
+  const key = cacheKey(["pages", doc.id, fromPage, toPage, startsWith, endsWith]);
+  const saved = readCache(key);
+  if (saved && saved.text) return saved.text;
+
+  const pdf = await slicePdfPages(pdfPath, fromPage, toPage);
+  if (!pdf) return null;
+
+  const prompt = READ_PAGES_PROMPT +
+    '\nTranscribe only the section "' + sectionTitle + '". It starts with the text: "' + startsWith + '" and it ends with the text: "' + endsWith + '". ' +
+    "Skip anything on these pages before the start or after the end of that section.";
+  const out = await runWithFallback({
+    parts: [{ text: prompt }, { inlineData: { mimeType: "application/pdf", data: pdf.toString("base64") } }],
+    temperature: 0
+  });
+  const text = String(out.result || "").trim();
+  // Safety: a very short answer means the reading went wrong, so keep the normal text instead
+  if (text.length < pieceText.length * 0.4) return null;
+  writeCache(key, { text: text });
+  console.log("Read pages " + fromPage + " to " + toPage + " of " + doc.name + " with " + out.model + " (" + text.length + " characters).");
+  return text;
 }
 
 // Split long text into pieces of at most `limit` characters, breaking at line ends
@@ -1376,9 +1579,14 @@ app.post("/api/upload", async function (req, res) {
 
     const built = await buildOutline(joined.text, joined.pageStarts, docName);
     const items = built.items;
+    const docId = crypto.randomBytes(6).toString("hex");
+    // Keep the real PDF, so equations, tables and figures can be read from its pages later
+    if (decoded.length === 1 && isPdf(decoded[0])) {
+      try { fs.mkdirSync(DOCS_DIR, { recursive: true }); fs.writeFileSync(path.join(DOCS_DIR, docId + ".pdf"), decoded[0].buffer); } catch (e) { /* page reading just stays off */ }
+    }
 
     const doc = {
-      id: crypto.randomBytes(6).toString("hex"),
+      id: docId,
       name: docName,
       courseTitle: built.courseTitle,
       pages: pages.length,
@@ -1479,6 +1687,18 @@ app.post("/api/lesson", async function (req, res) {
 
     if (sourceText.length < 80) {
       return res.status(400).json({ error: "This topic has almost no text under it. Pick another one." });
+    }
+
+    // Topics with equations, tables or figures: read the real PDF pages (once, then saved)
+    meta.pageReading = "off";
+    if (READ_PAGES && req.body.readPages !== false && (req.body.readPages === true || looksVisual(sourceText))) {
+      try {
+        const read = await readTopicPages(doc, item, sourceText, item.title);
+        if (read) { sourceText = read; meta.pageReading = "used"; } else { meta.pageReading = "unavailable"; }
+      } catch (error) {
+        console.error("Reading the PDF pages failed (the normal text is used):", describe(error));
+        meta.pageReading = "failed";
+      }
     }
   } else {
     // ---- pasted text ----
@@ -1774,6 +1994,6 @@ app.post("/api/quiz", async function (req, res) {
 app.listen(PORT, HOST, function () {
   console.log("AI Lecturer server running at http://" + HOST + ":" + PORT);
   console.log(ACCESS_CODE ? "Access code is ON (daily limit " + DAILY_LIMIT + " per visitor)." : "Access code is OFF (fine on your own computer).");
-  console.log("Models, in order: " + MODEL_LIST.join(" -> "));
+  console.log("Models, in order: " + MODEL_LIST.join(" -> ") + (GROQ_KEY ? " -> " + GROQ_MODELS.map(function (m) { return "groq:" + m; }).join(" -> ") + " (last backup)" : "  (no Groq backup: add GROQ_API_KEY to use one)"));
   console.log("Time limit per try: " + TIMEOUT_MS / 1000 + "s, per request: " + TOTAL_MS / 1000 + "s");
 });
