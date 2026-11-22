@@ -325,6 +325,14 @@ function pickVoice() {
   });
   if (english.length === 0) return null;
 
+  // A voice the learner picked earlier wins
+  let saved = "";
+  try { saved = localStorage.getItem("lecturerVoice") || ""; } catch (e) {}
+  if (saved) {
+    const found = english.find(function (v) { return v.name === saved; });
+    if (found) return found;
+  }
+
   function score(v) {
     let points = 0;
     if (v.localService) points += 10;                    // stored on this computer
@@ -332,16 +340,44 @@ function pickVoice() {
     if (lang === "en-gb" || lang === "en-ng") points += 3;
     else if (lang === "en-us") points += 2;
     if (/natural|online/i.test(v.name)) points -= 5;     // online voices lag
+    // The lecturer's face is male, so prefer a male voice when the device has one
+    if (/\b(david|mark|guy|ryan|alex|daniel|george|james|richard|christopher|eric|thomas|fred|male)\b/i.test(v.name)) points += 12;
+    if (/\b(zira|hazel|susan|samantha|victoria|karen|moira|fiona|female|aria|jenny)\b/i.test(v.name)) points -= 4;
     return points;
   }
   english.sort(function (a, b) { return score(b) - score(a); });
   return english[0];
 }
 
+// Fills the voice picker in the controls
+function fillVoicePicker() {
+  const picker = document.getElementById("voiceSelect");
+  if (!picker || !speechSupported) return;
+  const english = window.speechSynthesis.getVoices().filter(function (v) {
+    return v.lang && v.lang.toLowerCase().replace("_", "-").startsWith("en");
+  });
+  if (english.length === 0) return;
+  picker.innerHTML = "";
+  english.forEach(function (v) {
+    const option = document.createElement("option");
+    option.value = v.name;
+    option.textContent = v.name.replace(/^Microsoft |^Google /, "");
+    picker.appendChild(option);
+  });
+  if (chosenVoice) picker.value = chosenVoice.name;
+}
+
 if (speechSupported) {
   chosenVoice = pickVoice();
   // Chrome loads its voice list a moment after the page opens
-  window.speechSynthesis.onvoiceschanged = function () { chosenVoice = pickVoice(); };
+  window.speechSynthesis.onvoiceschanged = function () { chosenVoice = pickVoice(); fillVoicePicker(); };
+  fillVoicePicker();
+  const voicePickerEl = document.getElementById("voiceSelect");
+  if (voicePickerEl) voicePickerEl.addEventListener("change", function () {
+    try { localStorage.setItem("lecturerVoice", voicePickerEl.value); } catch (e) {}
+    chosenVoice = pickVoice();
+    if (isPlaying && lesson) { stopSpeaking(); showSegment(current, true); }   // hear the new voice straight away
+  });
 }
 
 
@@ -450,6 +486,8 @@ function speakPart(token, isRetry) {
         // A quiz re-teach segment ends the lesson when it is done; otherwise go to the next segment
         if (lesson.segments[current].endsLesson) {
           finishLesson();
+        } else if (lesson.segments[current].checkAfter) {
+          askUnderstanding();             // "Does that make sense?"
         } else {
           goTo(current + 1);              // whole segment spoken: next segment
         }
@@ -559,6 +597,7 @@ function showSegment(index, shouldSpeak) {
 
 function goTo(index) {
   if (!lesson) return;
+  closeCheck();
   if (index < 0) index = 0;
 
   if (index >= lesson.segments.length) {
@@ -665,6 +704,7 @@ function setReadyState() {
 
 function togglePlay() {
   if (!lesson) return;
+  if (checkOpen) { checkYes(); return; }      // Resume while the question is showing = "Yes, continue"
 
   if (isPlaying) {
     isPlaying = false;
@@ -730,10 +770,70 @@ if (speedSelect) {
    --------------------------------------------------------- */
 let isAsking = false;   // true while we wait for the server, so a second click is ignored
 
+
+/* ---------------------------------------------------------
+   "Does that make sense?" - asked after every answer
+   --------------------------------------------------------- */
+const checkBarEl = document.getElementById("checkBar");
+let checkOpen = false;
+
+function speakOneLine(text, done) {
+  if (!speechSupported || isMuted) { setTimeout(done, 900); return; }
+  const u = new SpeechSynthesisUtterance(text);
+  if (chosenVoice) { u.voice = chosenVoice; u.lang = chosenVoice.lang; } else u.lang = "en-GB";
+  u.rate = 0.95 * speechSpeed;
+  let fired = false;
+  function once() { if (!fired) { fired = true; done(); } }
+  u.onend = once; u.onerror = once;
+  setTimeout(once, 6000);                 // safety: never get stuck
+  window.speechSynthesis.speak(u);
+}
+
+function askUnderstanding() {
+  if (!checkBarEl) { goTo(current + 1); return; }
+  checkOpen = true;
+  isPlaying = false;
+  btnPlay.textContent = "\u25B6 Resume";
+  statusEl.textContent = "Waiting for you";
+  subtitleEl.textContent = "Does that make sense?";
+  checkBarEl.hidden = false;
+  speakOneLine("Does that make sense?", function () {});
+}
+
+function closeCheck() {
+  checkOpen = false;
+  if (checkBarEl) checkBarEl.hidden = true;
+}
+
+function checkYes() {
+  if (!checkOpen) return;
+  closeCheck();
+  stopSpeaking();
+  subtitleEl.textContent = "Great, let's continue with the lesson.";
+  speakOneLine("Great, let's continue with the lesson.", function () {
+    isPlaying = true;
+    btnPlay.textContent = "\u275A\u275A Pause";
+    goTo(current + 1);
+  });
+}
+
+function checkNo() {
+  if (!checkOpen) return;
+  closeCheck();
+  stopSpeaking();
+  askLecturer("simpler", "");
+}
+
+if (checkBarEl) {
+  document.getElementById("checkYes").addEventListener("click", checkYes);
+  document.getElementById("checkNo").addEventListener("click", checkNo);
+}
+
 async function askLecturer(mode, questionText, options) {
   options = options || {};
   if (!lesson || isAsking) return;
   isAsking = true;
+  closeCheck();
 
   // Pause, but remember the sentence so Resume still works if the question fails
   isPlaying = false;
@@ -772,6 +872,7 @@ async function askLecturer(mode, questionText, options) {
       data.segment.temp = true;
       data.segment.endsLesson = true;
     }
+    if (!options.endAfter) data.segment.checkAfter = true;   // after the answer: "Does that make sense?"
     data.segment.topic = now.topic;                // the answer belongs to the topic being taught
     data.segment.topicIndex = now.topicIndex;
     data.segment.ref = now.ref;

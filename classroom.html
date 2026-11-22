@@ -170,6 +170,14 @@
         <option value="1.25">1.25x</option>
         <option value="1.5">1.5x</option>
       </select>
+      <select class="btn" id="voiceSelect" aria-label="Lecturer voice" title="Lecturer voice"><option>Voice</option></select>
+    </div>
+
+    <!-- Shown after the lecturer answers a question -->
+    <div class="check-bar" id="checkBar" hidden>
+      <span>Does that make sense?</span>
+      <button class="btn btn-primary" id="checkYes" type="button">Yes, continue</button>
+      <button class="btn" id="checkNo" type="button">Not yet, explain again</button>
     </div>
 
     <!-- Ask the lecturer (text interaction; voice comes later) -->

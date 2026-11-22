@@ -194,6 +194,7 @@ async function authLogIn(email, password) {
 async function authLogOut() {
   const session = getSession();
   clearSession();
+  clearLocalGuestData();            // the next person on this browser starts clean
   if (session && session.access_token) { try { await authCall("logout", {}, session.access_token); } catch (error) { /* fine */ } }
 }
 
@@ -235,13 +236,25 @@ function renderAccountBar(container) {
   container.hidden = false;
 }
 
-// A guest just logged in: move the documents and progress this browser had into the account
+// Forget the documents and progress markers kept in THIS browser (the guest list)
+function clearLocalGuestData() {
+  try {
+    getMyDocIds().forEach(function (id) { localStorage.removeItem(doneKey(id)); });
+    localStorage.removeItem(MY_DOCS_KEY);
+  } catch (error) { /* ignore */ }
+}
+
+// A guest just logged in: move the documents and progress this browser had into the account.
+// Afterwards the browser forgets them, so they belong to THIS account only.
 async function claimGuestData() {
   const ids = getMyDocIds();
   if (ids.length === 0) return;
   const done = {};
   ids.forEach(function (id) { done[id] = getDone(id); });
-  try { await postJson("/api/mydocs/claim", { ids: ids, done: done }); } catch (error) { /* they stay in this browser */ }
+  try {
+    await postJson("/api/mydocs/claim", { ids: ids, done: done });
+    clearLocalGuestData();
+  } catch (error) { /* they stay in this browser, and are tried again at the next login */ }
 }
 
 // fetch() for our server. It adds the access code, and if the server asks for the
@@ -331,6 +344,9 @@ function getMyDocIds() {
 }
 
 function rememberDoc(docId) {
+  // Logged in: the account keeps the list on the server, so this browser must not keep one
+  // (otherwise the next person to log in here would get these documents too).
+  if (getSession()) return;
   try {
     const ids = getMyDocIds().filter(function (id) { return id !== docId; });
     ids.unshift(docId);                                    // newest first

@@ -619,3 +619,8 @@ body {
 .btn-mic { width: 48px; padding: 0; font-size: 1.15rem; flex-shrink: 0; }
 .btn-mic.is-listening { background: #d94b4b; border-color: #d94b4b; color: #fff; animation: micPulse 1s ease-in-out infinite; }
 @keyframes micPulse { 50% { box-shadow: 0 0 0 6px rgba(217, 75, 75, 0.25); } }
+
+/* Does that make sense? */
+.check-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; font-weight: 600; }
+.check-bar[hidden] { display: none; }
+#voiceSelect { max-width: 130px; }
