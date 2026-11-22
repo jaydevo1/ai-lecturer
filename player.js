@@ -145,6 +145,16 @@ async function loadLesson() {
     }
 
     playlist = lesson.playlist || null;     // set by the contents page: the topics of a unit, in order
+
+    // A logged-in learner is greeted by name when a unit begins ("Hi Jay. Welcome to ...")
+    const firstName = getLearnerName();
+    const startsUnit = playlist && playlist.index === 0 && playlist.entries && playlist.entries[0] &&
+      (playlist.entries[0].position === "first" || playlist.entries[0].position === "only");
+    if (firstName && startsUnit && !lesson.greeted && lesson.segments && lesson.segments[0]) {
+      lesson.segments[0].speech = "Hi " + firstName + ". " + lesson.segments[0].speech;
+      lesson.greeted = true;
+      try { sessionStorage.setItem("currentLesson", JSON.stringify(lesson)); } catch (storageError) { /* fine */ }
+    }
     tagSegments(lesson.segments, 0, lesson.sectionTitle || lesson.title, lesson);
     lessonTitleEl.textContent = lesson.title;
     if (lesson.docName) topbarLabelEl.textContent = lesson.docName;

@@ -25,7 +25,7 @@ h1 { font-size: 1.6rem; margin-bottom: 6px; }
 .form { display: flex; flex-direction: column; gap: 12px; }
 label { font-size: 0.85rem; font-weight: 600; }
 
-textarea, select {
+textarea, select, input[type="text"], input[type="email"], input[type="password"] {
   width: 100%;
   padding: 12px;
   border: 1px solid var(--line);
@@ -104,3 +104,19 @@ select[hidden] { display: none; }
 }
 .approach-btn.is-on { background: var(--board); color: #fff; border-color: var(--board); }
 .approach-note { font-size: 0.8rem; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+
+
+/* ACCOUNT BAR, SAVED-LIST X BUTTON, LOGIN PAGE */
+.account-bar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between;
+  background: var(--card, #fff); border: 1px solid var(--line, #ddd); border-radius: 10px; padding: 8px 12px;
+  font-size: 0.85rem; color: var(--muted); margin-bottom: 14px; }
+.account-link { background: none; border: none; padding: 0; font: inherit; color: var(--board, #1f4d3a); text-decoration: underline; cursor: pointer; }
+.saved-item { display: flex; gap: 8px; align-items: stretch; }
+.saved-item a { flex: 1; min-width: 0; }
+.saved-x { flex: 0 0 44px; border: 1px solid var(--line, #ddd); background: transparent; border-radius: 10px; font-size: 1rem; cursor: pointer; color: var(--muted); }
+.saved-x:hover { color: #b3392b; border-color: #b3392b; }
+.auth-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.auth-tab { flex: 1; padding: 10px; border: 1px solid var(--line, #ddd); background: transparent; border-radius: 10px; font-size: 0.95rem; cursor: pointer; }
+.auth-tab.is-on { background: var(--board, #1f4d3a); color: #fff; border-color: var(--board, #1f4d3a); }
+.auth-show { display: flex; gap: 6px; align-items: center; font-size: 0.85rem; color: var(--muted); }
+.guest-link { display: block; text-align: center; margin-top: 14px; color: var(--muted); }

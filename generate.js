@@ -143,34 +143,66 @@ async function loadSavedMaterial() {
   const card = document.getElementById("savedCard");
   const list = document.getElementById("savedList");
   try {
-    // On your own computer the server may list everything. On a shared server it will not (that
-    // would show other people's uploads), so we ask only about the documents THIS browser uploaded.
     let docs = [];
-    const all = await apiFetch("/api/docs");
-    if (all.ok) {
-      docs = (await all.json()).docs || [];
-    } else {
-      const ids = getMyDocIds();
-      if (ids.length === 0) return;
-      const response = await apiFetch("/api/docs/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: ids })
-      });
-      if (!response.ok) return;
-      docs = (await response.json()).docs || [];
-      // keep the order of our own list (newest first)
-      docs.sort(function (a, b) { return ids.indexOf(a.docId) - ids.indexOf(b.docId); });
+    let fromAccount = false;
+
+    if (getSession()) {
+      // Logged in: the server keeps MY list (it survives the server sleeping and works on any device)
+      const mine = await apiFetch("/api/mydocs");
+      if (mine.ok) { docs = (await mine.json()).docs || []; fromAccount = true; }
+    }
+
+    if (!fromAccount) {
+      // Guest: on your own computer the server may list everything. On a shared server it will not,
+      // so we ask only about the documents THIS browser uploaded.
+      const all = await apiFetch("/api/docs");
+      if (all.ok) {
+        docs = (await all.json()).docs || [];
+      } else {
+        const ids = getMyDocIds();
+        if (ids.length === 0) return;
+        const response = await apiFetch("/api/docs/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: ids })
+        });
+        if (!response.ok) return;
+        docs = (await response.json()).docs || [];
+        docs.sort(function (a, b) { return ids.indexOf(a.docId) - ids.indexOf(b.docId); });   // newest first
+      }
     }
     if (docs.length === 0) return;
 
     list.replaceChildren();
     docs.forEach(function (doc) {
       const item = document.createElement("li");
+      item.className = "saved-item";
+
       const link = document.createElement("a");
       link.href = "outline.html?doc=" + encodeURIComponent(doc.docId);
       link.textContent = (doc.courseTitle || doc.name) + "  (" + doc.pages + " page" + (doc.pages === 1 ? "" : "s") + ")";
-      item.append(link);
+
+      // The X: remove it from MY list (nobody else's)
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "saved-x";
+      remove.textContent = "\u2715";
+      remove.title = "Remove from my list";
+      remove.setAttribute("aria-label", "Remove " + (doc.courseTitle || doc.name) + " from my list");
+      remove.addEventListener("click", async function () {
+        if (!window.confirm("Remove this from your list? Your saved progress for it will be cleared.")) return;
+        remove.disabled = true;
+        try {
+          await removeMyDoc(doc.docId);
+          item.remove();
+          if (list.children.length === 0) card.hidden = true;
+        } catch (error) {
+          remove.disabled = false;
+          window.alert(error.message);
+        }
+      });
+
+      item.append(link, remove);
       list.append(item);
     });
     card.hidden = false;
@@ -179,4 +211,5 @@ async function loadSavedMaterial() {
   }
 }
 
+renderAccountBar(document.getElementById("accountBar"));
 loadSavedMaterial();

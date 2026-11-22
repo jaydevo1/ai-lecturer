@@ -169,7 +169,7 @@ async function loadOutline() {
       "Open a module, then a unit, then tap Teach this on the topic you want. Topics you already generated are marked.";
 
     currentOutline = data.outline;
-    doneIds = getDone(docId);
+    doneIds = await getDoneAsync(docId);
     drawTree(currentOutline);
   } catch (error) {
     console.error(error);
@@ -181,9 +181,9 @@ async function loadOutline() {
 }
 
 // Coming back from the classroom with the Back button: refresh the "generated" marks
-window.addEventListener("pageshow", function (event) {
+window.addEventListener("pageshow", async function (event) {
   if (event.persisted && currentOutline.length) {
-    doneIds = getDone(docId);
+    doneIds = await getDoneAsync(docId);
     drawTree(currentOutline);
   }
 });

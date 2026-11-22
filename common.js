@@ -11,8 +11,9 @@
 // ---- WHERE IS THE SERVER? ----
 // On your own computer the server is at 127.0.0.1:3000.
 // Once the pages are online (GitHub Pages), they must talk to the ONLINE server.
-// After you deploy the server on Render, paste its address below (no slash at the end).
-const ONLINE_SERVER_URL = "https://ai-lecturer-b0qs.onrender.com";
+// The online address now lives in config.js (paste your Render address there, once).
+const APP_CONFIG = window.APP_CONFIG || {};
+const ONLINE_SERVER_URL = String(APP_CONFIG.serverUrl || "").replace(/\/+$/, "");
 
 const IS_LOCAL = ["127.0.0.1", "localhost", ""].includes(window.location.hostname);
 const SERVER_URL = IS_LOCAL ? "http://127.0.0.1:3000" : ONLINE_SERVER_URL;
@@ -116,6 +117,133 @@ function buildApproachPicker(selectEl) {
   refresh();
 }
 
+/* =========================================================
+   ACCOUNTS (log in / sign up / log out)
+   The login service is Supabase. We talk to it with plain fetch(). The "session" (login pass + name)
+   is kept in this browser. Guests have no session and everything still works for them.
+   ========================================================= */
+const SESSION_KEY = "lecturerSession";
+
+function accountsReady() { return Boolean(APP_CONFIG.supabaseUrl && APP_CONFIG.supabaseKey); }
+function getSession() {
+  try { return JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch (error) { return null; }
+}
+function saveSession(session) { try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (error) { /* ignore */ } }
+function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch (error) { /* ignore */ } }
+
+// The learner's first name (empty for guests): the lecturer uses it when he welcomes you
+function getLearnerName() {
+  const session = getSession();
+  const name = session && session.user && session.user.name ? String(session.user.name).trim() : "";
+  return name.split(/\s+/)[0] || "";
+}
+
+function friendlyAuthError(data) {
+  const raw = String(data.error_description || data.msg || data.message || data.error || "");
+  const m = raw.toLowerCase();
+  if (m.includes("invalid login")) return "Wrong email or password.";
+  if (m.includes("already registered") || m.includes("already been registered")) return "That email already has an account. Log in instead.";
+  if (m.includes("password should") || m.includes("weak")) return "Use a longer password (at least 6 characters).";
+  if (m.includes("rate limit")) return "Too many tries. Wait a few minutes and try again.";
+  if (m.includes("not confirmed")) return "Please confirm your email first (check your inbox).";
+  if (m.includes("valid email") || m.includes("invalid email")) return "That email address does not look right.";
+  return raw || "Something went wrong. Try again.";
+}
+
+async function authCall(path, body, token) {
+  const headers = { "Content-Type": "application/json", apikey: APP_CONFIG.supabaseKey };
+  if (token) headers.Authorization = "Bearer " + token;
+  let response;
+  try {
+    response = await fetch(APP_CONFIG.supabaseUrl + "/auth/v1/" + path, { method: "POST", headers: headers, body: JSON.stringify(body || {}) });
+  } catch (error) {
+    throw new Error("Cannot reach the login service. Check your internet.");
+  }
+  let data = {};
+  try { data = await response.json(); } catch (error) { data = {}; }
+  if (!response.ok) { const err = new Error(friendlyAuthError(data)); err.status = response.status; throw err; }
+  return data;
+}
+
+function sessionFromResponse(data, fallbackName) {
+  const user = data.user || {};
+  const meta = user.user_metadata || {};
+  return {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_at: Date.now() + (Number(data.expires_in) || 3600) * 1000,
+    user: { id: user.id, email: user.email, name: meta.name || fallbackName || "" }
+  };
+}
+
+async function authSignUp(name, email, password) {
+  const data = await authCall("signup", { email: email, password: password, data: { name: name } });
+  if (!data.access_token) return { needsConfirm: true };       // the project asks for email confirmation first
+  const session = sessionFromResponse(data, name);
+  saveSession(session);
+  return { session: session };
+}
+
+async function authLogIn(email, password) {
+  const data = await authCall("token?grant_type=password", { email: email, password: password });
+  const session = sessionFromResponse(data);
+  saveSession(session);
+  return session;
+}
+
+async function authLogOut() {
+  const session = getSession();
+  clearSession();
+  if (session && session.access_token) { try { await authCall("logout", {}, session.access_token); } catch (error) { /* fine */ } }
+}
+
+// The login pass, renewed automatically when it is about to run out
+async function getAccessToken() {
+  const session = getSession();
+  if (!session || !session.access_token) return "";
+  if (session.expires_at - Date.now() > 60000) return session.access_token;
+  try {
+    const data = await authCall("token?grant_type=refresh_token", { refresh_token: session.refresh_token });
+    const fresh = sessionFromResponse(data, session.user && session.user.name);
+    if (!fresh.user.name && session.user) fresh.user.name = session.user.name;
+    saveSession(fresh);
+    return fresh.access_token;
+  } catch (error) {
+    if (error.status === 400 || error.status === 401) clearSession();   // the login ended: back to guest
+    return session.access_token;
+  }
+}
+
+// The little bar at the top of a page: "Signed in as Jay [Log out]" or the guest note
+function renderAccountBar(container) {
+  if (!container || !accountsReady()) return;
+  container.replaceChildren();
+  const session = getSession();
+  const text = document.createElement("span");
+  if (session && session.user) {
+    text.textContent = "Signed in as " + (session.user.name || session.user.email) + ". Your PDFs and progress are saved to your account.";
+    const out = document.createElement("button");
+    out.type = "button"; out.className = "account-link"; out.textContent = "Log out";
+    out.addEventListener("click", async function () { await authLogOut(); window.location.reload(); });
+    container.append(text, out);
+  } else {
+    text.textContent = "Guest mode: your PDFs and progress stay only in this browser.";
+    const link = document.createElement("a");
+    link.className = "account-link"; link.href = "login.html"; link.textContent = "Log in or create an account";
+    container.append(text, link);
+  }
+  container.hidden = false;
+}
+
+// A guest just logged in: move the documents and progress this browser had into the account
+async function claimGuestData() {
+  const ids = getMyDocIds();
+  if (ids.length === 0) return;
+  const done = {};
+  ids.forEach(function (id) { done[id] = getDone(id); });
+  try { await postJson("/api/mydocs/claim", { ids: ids, done: done }); } catch (error) { /* they stay in this browser */ }
+}
+
 // fetch() for our server. It adds the access code, and if the server asks for the
 // code (or the saved one is wrong) it asks the learner to type it once, then tries again.
 async function apiFetch(path, options) {
@@ -124,7 +252,8 @@ async function apiFetch(path, options) {
     let code = "";
     try { code = localStorage.getItem(ACCESS_CODE_KEY) || ""; } catch (error) { code = ""; }
 
-    const headers = Object.assign({}, options.headers, code ? { "x-access-code": code } : {});
+    const token = await getAccessToken();
+    const headers = Object.assign({}, options.headers, code ? { "x-access-code": code } : {}, token ? { Authorization: "Bearer " + token } : {});
     const response = await fetch(SERVER_URL + path, Object.assign({}, options, { headers: headers }));
 
     if (response.status !== 401) return response;
@@ -223,6 +352,38 @@ function markDone(docId, sectionId) {
       localStorage.setItem(doneKey(docId), JSON.stringify(done));
     }
   } catch (error) { /* not saving is fine */ }
+  // Logged in: also save it to the account, so it follows you to any phone or computer
+  if (getSession()) {
+    apiFetch("/api/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ docId: docId, sectionIds: [sectionId] })
+    }).catch(function () { /* the local copy is still there */ });
+  }
+}
+
+// The done list to show: from the account when logged in, from this browser for guests
+async function getDoneAsync(docId) {
+  const local = getDone(docId);
+  if (!getSession()) return local;
+  try {
+    const response = await apiFetch("/api/progress/" + encodeURIComponent(docId));
+    if (!response.ok) return local;
+    return (await response.json()).done || [];
+  } catch (error) { return local; }
+}
+
+// The X button: take a document out of MY list (the shared copy stays for other people)
+async function removeMyDoc(docId) {
+  try {
+    const ids = getMyDocIds().filter(function (id) { return id !== docId; });
+    localStorage.setItem(MY_DOCS_KEY, JSON.stringify(ids));
+    localStorage.removeItem(doneKey(docId));
+  } catch (error) { /* ignore */ }
+  if (getSession()) {
+    const response = await apiFetch("/api/mydocs/" + encodeURIComponent(docId), { method: "DELETE" });
+    if (!response.ok) throw new Error("Could not remove it. Try again.");
+  }
 }
 
 /* =========================================================

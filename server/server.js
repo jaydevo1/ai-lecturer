@@ -65,6 +65,9 @@ const MAX_IMAGES = 6;
 const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, "cache");   // saved lessons
 const DOCS_DIR = process.env.DOCS_DIR || path.join(__dirname, "docs");      // uploaded documents
 
+// Where things are kept: Supabase online (survives the free server sleeping), or these folders on your own computer.
+const store = require("./store")({ cacheDir: CACHE_DIR, docsDir: DOCS_DIR });
+
 // Change this word when the teaching prompt changes, so old saved lessons are not reused
 const PROMPT_VERSION = "v9";
 
@@ -117,6 +120,17 @@ app.use(["/api/lesson", "/api/ask", "/api/quiz", "/api/upload"], function (req, 
     return res.status(429).json({ error: "You have reached today's limit of " + DAILY_LIMIT + " requests. Come back tomorrow." });
   }
   use.count++;
+  next();
+});
+
+
+// ---- Who is this? (optional): a logged-in person sends their login pass; guests send nothing ----
+app.use("/api", async function (req, res, next) {
+  req.user = null;
+  const match = /^Bearer\s+(.+)$/i.exec(req.get("authorization") || "");
+  if (match && store.online) {
+    try { req.user = await store.accounts.verify(match[1].trim()); } catch (e) { req.user = null; }
+  }
   next();
 });
 
@@ -869,17 +883,12 @@ function cacheKey(parts) {
   return crypto.createHash("sha256").update([PROMPT_VERSION].concat(parts).join("\n---\n")).digest("hex");
 }
 
-function readCache(key) {
-  try { return JSON.parse(fs.readFileSync(path.join(CACHE_DIR, key + ".json"), "utf8")); } catch (e) { return null; }
+async function readCache(key) {
+  try { return await store.cacheGet(key); } catch (e) { console.error("Could not read the cache:", e.message); return null; }
 }
 
-function writeCache(key, lesson) {
-  try {
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
-    fs.writeFileSync(path.join(CACHE_DIR, key + ".json"), JSON.stringify(lesson));
-  } catch (e) {
-    console.error("Could not save the lesson to the cache:", e.message);
-  }
+async function writeCache(key, lesson) {
+  try { await store.cacheSet(key, lesson); } catch (e) { console.error("Could not save to the cache:", e.message); }
 }
 
 
@@ -942,10 +951,10 @@ function looksVisual(text) {
   return lines.length >= 15 && tiny / lines.length > 0.3;     // broken formula fragments on their own lines
 }
 
-async function slicePdfPages(pdfPath, fromPage, toPage) {
+async function slicePdfPages(pdfBuffer, fromPage, toPage) {
   let PDFLib;
   try { PDFLib = require("pdf-lib"); } catch (e) { console.log("Page reading is off: run npm install in the server folder (pdf-lib is missing)."); return null; }
-  const source = await PDFLib.PDFDocument.load(fs.readFileSync(pdfPath), { ignoreEncryption: true });
+  const source = await PDFLib.PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
   const out = await PDFLib.PDFDocument.create();
   const wanted = [];
   for (let p = fromPage; p <= toPage; p++) if (p >= 1 && p <= source.getPageCount()) wanted.push(p - 1);
@@ -957,8 +966,7 @@ async function slicePdfPages(pdfPath, fromPage, toPage) {
 
 // Returns the page-read text of this part of a topic, or null (then the normal text is used)
 async function readTopicPages(doc, item, pieceText, sectionTitle) {
-  const pdfPath = path.join(DOCS_DIR, doc.id + ".pdf");
-  if (!fs.existsSync(pdfPath) || !doc.pageStarts) return null;
+  if (!doc.pageStarts) return null;
 
   const sectionText = doc.text.slice(item.start, item.teachEnd || item.end);
   const at = Math.max(0, sectionText.indexOf(pieceText.slice(0, 80)));
@@ -970,10 +978,12 @@ async function readTopicPages(doc, item, pieceText, sectionTitle) {
   const startsWith = pieceText.slice(0, 120).replace(/\s+/g, " ");
   const endsWith = pieceText.slice(-120).replace(/\s+/g, " ");
   const key = cacheKey(["pages", doc.id, fromPage, toPage, startsWith, endsWith]);
-  const saved = readCache(key);
+  const saved = await readCache(key);
   if (saved && saved.text) return saved.text;
 
-  const pdf = await slicePdfPages(pdfPath, fromPage, toPage);
+  const pdfBuffer = await store.pdfGet(doc.id);       // the saved original PDF (none for old uploads)
+  if (!pdfBuffer) return null;
+  const pdf = await slicePdfPages(pdfBuffer, fromPage, toPage);
   if (!pdf) return null;
 
   const prompt = READ_PAGES_PROMPT +
@@ -986,7 +996,7 @@ async function readTopicPages(doc, item, pieceText, sectionTitle) {
   const text = String(out.result || "").trim();
   // Safety: a very short answer means the reading went wrong, so keep the normal text instead
   if (text.length < pieceText.length * 0.4) return null;
-  writeCache(key, { text: text });
+  await writeCache(key, { text: text });
   console.log("Read pages " + fromPage + " to " + toPage + " of " + doc.name + " with " + out.model + " (" + text.length + " characters).");
   return text;
 }
@@ -1516,9 +1526,8 @@ function specialText(doc, ownerId, kind, maxChars) {
 /* ---------------------------------------------------------
    12. SAVING UPLOADED DOCUMENTS ON DISK
    --------------------------------------------------------- */
-function saveDoc(doc) {
-  fs.mkdirSync(DOCS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(DOCS_DIR, doc.id + ".json"), JSON.stringify(doc));
+async function saveDoc(doc) {
+  await store.docSet(doc);
 }
 
 // Documents saved by an older version of this server have no "kind" on their headings.
@@ -1551,13 +1560,20 @@ function upgradeDoc(doc) {
   }
   if (items) doc.items = items;
   doc.version = 4;
-  try { saveDoc(doc); } catch (e) { /* not saving is fine, it will be rebuilt next time */ }
   return doc;
 }
 
-function loadDoc(id) {
+async function loadDoc(id) {
   if (!/^[a-f0-9]{12}$/.test(String(id))) return null;     // blocks tricks like "../../secret"
-  try { return upgradeDoc(JSON.parse(fs.readFileSync(path.join(DOCS_DIR, id + ".json"), "utf8"))); } catch (e) { return null; }
+  let raw = null;
+  try { raw = await store.docGet(id); } catch (e) { console.error("Could not load a document:", e.message); return null; }
+  if (!raw) return null;
+  const versionBefore = raw.version;
+  const doc = upgradeDoc(raw);
+  if (doc && doc.version !== versionBefore) {
+    try { await saveDoc(doc); } catch (e) { /* not saving is fine, it will be rebuilt next time */ }
+  }
+  return doc;
 }
 
 function docSummary(doc) {
@@ -1578,6 +1594,21 @@ function docSummary(doc) {
    --------------------------------------------------------- */
 function friendlyError(error) {
   const failures = error.failures || [];
+
+  // A problem with OUR database (Supabase), not with Google
+  if (error.isStore) {
+    const text = String(error.storeText || error.message || "");
+    if (/42501|permission denied/i.test(text)) {
+      return { code: 500, message: "The online database refused access (permission denied). In Supabase, run the fix in supabase-setup.sql (the GRANT lines), then try again." };
+    }
+    if (error.storeStatus === 401 || error.storeStatus === 403) {
+      return { code: 500, message: "The online database rejected the server's key. Check SUPABASE_URL and SUPABASE_SECRET_KEY, then restart the server." };
+    }
+    if (error.storeStatus === 404 || /42P01|does not exist|schema cache/i.test(text)) {
+      return { code: 500, message: "The online database is missing its tables. In Supabase, run supabase-setup.sql once, then try again." };
+    }
+    return { code: 500, message: "The online database had a problem. Check the server terminal for details and try again." };
+  }
 
   if (error.status === 401 || error.status === 403) {
     return { code: 502, message: "Google rejected the API key. Check GEMINI_API_KEY in server/.env, save, and restart the server." };
@@ -1654,6 +1685,20 @@ app.post("/api/upload", async function (req, res) {
   const isImage = function (f) { return /^image\/(png|jpeg|webp)$/.test(f.mimeType); };
 
   try {
+    // The same file uploaded before (by anybody)? Then reuse its contents: no waiting and no Gemini request.
+    const fileHash = crypto.createHash("sha256");
+    decoded.forEach(function (f) { fileHash.update(f.buffer); });
+    const hash = fileHash.digest("hex");
+    const already = await store.docFindByHash(hash);
+    if (already) {
+      const reused = await loadDoc(already.id);
+      if (reused) {
+        if (req.user) await store.accounts.link(req.user.id, reused.id);
+        console.log("Document reused: " + reused.name + " (same file uploaded before)");
+        return res.json(docSummary(reused));
+      }
+    }
+
     let pages;
     let docName;
 
@@ -1689,11 +1734,12 @@ app.post("/api/upload", async function (req, res) {
     const docId = crypto.randomBytes(6).toString("hex");
     // Keep the real PDF, so equations, tables and figures can be read from its pages later
     if (decoded.length === 1 && isPdf(decoded[0])) {
-      try { fs.mkdirSync(DOCS_DIR, { recursive: true }); fs.writeFileSync(path.join(DOCS_DIR, docId + ".pdf"), decoded[0].buffer); } catch (e) { /* page reading just stays off */ }
+      try { await store.pdfPut(docId, decoded[0].buffer); } catch (e) { console.error("Could not keep the PDF (page reading stays off for it):", e.message); }
     }
 
     const doc = {
       id: docId,
+      hash: hash,
       name: docName,
       courseTitle: built.courseTitle,
       pages: pages.length,
@@ -1705,7 +1751,8 @@ app.post("/api/upload", async function (req, res) {
       text: joined.text,
       items: items
     };
-    saveDoc(doc);
+    await saveDoc(doc);
+    if (req.user) await store.accounts.link(req.user.id, doc.id);
     console.log("Document saved: " + doc.name + " (" + doc.pages + " pages, " + items.length + " outline entries, outline from " + built.source + ")");
     res.json(docSummary(doc));
   } catch (error) {
@@ -1717,38 +1764,86 @@ app.post("/api/upload", async function (req, res) {
 
 // Get the outline of a document that was uploaded earlier
 // Which of these document ids still exist on the server? (each browser keeps its own list of ids)
-app.post("/api/docs/status", function (req, res) {
+app.post("/api/docs/status", async function (req, res) {
   const ids = Array.isArray(req.body.ids) ? req.body.ids.slice(0, 50) : [];
   const docs = [];
-  ids.forEach(function (id) {
-    const doc = loadDoc(id);
+  for (const id of ids) {
+    const doc = await loadDoc(id);
     if (doc) docs.push({ docId: doc.id, name: doc.name, courseTitle: doc.courseTitle, pages: doc.pages });
-  });
+  }
   res.json({ docs: docs });
 });
 
-// List of everything uploaded before, newest first (for the "Your saved material" card)
-app.get("/api/docs", function (req, res) {
-  // When the site is shared (an access code is set), nobody may list everybody's uploads
-  if (ACCESS_CODE) return res.status(403).json({ error: "Not available on a shared server." });
-  let files = [];
-  try { files = fs.readdirSync(DOCS_DIR).filter(function (f) { return /^[a-f0-9]{12}\.json$/.test(f); }); } catch (e) { files = []; }
-
-  const list = files.map(function (f) {
-    const doc = loadDoc(f.replace(".json", ""));
-    if (!doc) return null;
-    let when = 0;
-    try { when = fs.statSync(path.join(DOCS_DIR, f)).mtimeMs; } catch (e) { when = 0; }
-    return { docId: doc.id, name: doc.name, courseTitle: doc.courseTitle, pages: doc.pages, when: when };
-  }).filter(Boolean).sort(function (x, y) { return y.when - x.when; });
-
+// List of everything uploaded before, newest first. Only on your own computer (no accounts, no shared server):
+// otherwise everybody would see everybody's uploads. Online, each person asks for their own list (/api/mydocs).
+app.get("/api/docs", async function (req, res) {
+  if (ACCESS_CODE || store.online) return res.status(403).json({ error: "Not available on a shared server." });
+  const list = await store.listAll();
   res.json({ docs: list.slice(0, 30) });
 });
 
-app.get("/api/doc/:id", function (req, res) {
-  const doc = loadDoc(req.params.id);
+app.get("/api/doc/:id", async function (req, res) {
+  const doc = await loadDoc(req.params.id);
   if (!doc) return res.status(404).json({ error: "That document was not found. Upload it again." });
+  // Opening a document while logged in also puts it in that person's own list
+  if (req.user) store.accounts.link(req.user.id, doc.id).catch(function (e) { console.error("Could not link the document:", e.message); });
   res.json(docSummary(doc));
+});
+
+/* ---------------------------------------------------------
+   ACCOUNTS: my documents and my progress (log in needed)
+   --------------------------------------------------------- */
+function needUser(req, res) {
+  if (!store.online) { res.status(503).json({ error: "Accounts are not set up on this server yet." }); return false; }
+  if (!req.user) { res.status(403).json({ error: "Please log in.", needLogin: true }); return false; }   // 403, not 401: 401 means "access code"
+  return true;
+}
+
+app.get("/api/mydocs", async function (req, res) {
+  if (!needUser(req, res)) return;
+  try { res.json({ docs: await store.accounts.list(req.user.id) }); }
+  catch (e) { console.error(e.message); res.status(500).json({ error: "Could not load your documents. Try again." }); }
+});
+
+app.delete("/api/mydocs/:id", async function (req, res) {
+  if (!needUser(req, res)) return;
+  if (!/^[a-f0-9]{12}$/.test(req.params.id)) return res.status(400).json({ error: "Bad document id." });
+  try { await store.accounts.unlink(req.user.id, req.params.id); res.json({ ok: true }); }
+  catch (e) { console.error(e.message); res.status(500).json({ error: "Could not remove it. Try again." }); }
+});
+
+// A guest just made an account: move the documents (and progress) this browser had into the account
+app.post("/api/mydocs/claim", async function (req, res) {
+  if (!needUser(req, res)) return;
+  const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).filter(function (id) { return /^[a-f0-9]{12}$/.test(String(id)); }).slice(0, 50);
+  const done = req.body.done && typeof req.body.done === "object" ? req.body.done : {};
+  let claimed = 0;
+  try {
+    for (const id of ids) {
+      if (!(await loadDoc(id))) continue;
+      await store.accounts.link(req.user.id, id);
+      const sections = Array.isArray(done[id]) ? done[id].map(String).slice(0, 500) : [];
+      await store.accounts.progressMark(req.user.id, id, sections);
+      claimed++;
+    }
+    res.json({ claimed: claimed });
+  } catch (e) { console.error(e.message); res.status(500).json({ error: "Could not move your documents. Try again." }); }
+});
+
+app.get("/api/progress/:docId", async function (req, res) {
+  if (!needUser(req, res)) return;
+  if (!/^[a-f0-9]{12}$/.test(req.params.docId)) return res.status(400).json({ error: "Bad document id." });
+  try { res.json({ done: await store.accounts.progressList(req.user.id, req.params.docId) }); }
+  catch (e) { console.error(e.message); res.status(500).json({ error: "Could not load your progress." }); }
+});
+
+app.post("/api/progress", async function (req, res) {
+  if (!needUser(req, res)) return;
+  const docId = String(req.body.docId || "");
+  if (!/^[a-f0-9]{12}$/.test(docId)) return res.status(400).json({ error: "Bad document id." });
+  const sections = (Array.isArray(req.body.sectionIds) ? req.body.sectionIds : []).map(String).slice(0, 500);
+  try { await store.accounts.progressMark(req.user.id, docId, sections); res.json({ ok: true }); }
+  catch (e) { console.error(e.message); res.status(500).json({ error: "Could not save your progress." }); }
 });
 
 // Make a lesson: either from pasted text, or from one section of an uploaded document
@@ -1767,7 +1862,7 @@ app.post("/api/lesson", async function (req, res) {
 
   if (req.body.docId) {
     // ---- one topic of an uploaded document ----
-    const doc = loadDoc(req.body.docId);
+    const doc = await loadDoc(req.body.docId);
     if (!doc) return res.status(404).json({ error: "That document was not found. Upload it again." });
     const item = doc.items.find(function (i) { return i.id === req.body.sectionId; });
     if (!item) return res.status(404).json({ error: "That topic was not found." });
@@ -1821,7 +1916,7 @@ app.post("/api/lesson", async function (req, res) {
   // Already made this exact lesson (by anyone)? Reuse it for free.
   const extrasText = [extras.unitTitle || "", (extras.topics || []).join(";")].join("|");
   const key = cacheKey([level, difficulty, approach, sectionTitle, position, sourceText, extrasText]);
-  const saved = readCache(key);
+  const saved = await readCache(key);
   if (saved) {
     console.log("Served from the saved lessons (no Gemini request used).");
     return res.json(Object.assign({}, saved, meta, { cached: true }));
@@ -1839,7 +1934,7 @@ app.post("/api/lesson", async function (req, res) {
     const lesson = cleanLesson(out.result, sourceText);
     if (sectionTitle) lesson.title = sectionTitle;
     lesson.approach = approach;
-    writeCache(key, lesson);
+    await writeCache(key, lesson);
 
     console.log("Lesson ready from " + out.model + " (" + lesson.segments.length + " segments, position " + position + "). Exact quotes: " +
       lesson.exactQuotes.verified + " verified, " + lesson.exactQuotes.removed + " removed (not found word for word).");
@@ -1905,7 +2000,7 @@ app.post("/api/ask", async function (req, res) {
   // If the lesson came from an uploaded document, include the real text of that section
   let sourceText = "";
   if (req.body.docId) {
-    const doc = loadDoc(req.body.docId);
+    const doc = await loadDoc(req.body.docId);
     const item = doc && doc.items.find(function (i) { return i.id === req.body.sectionId; });
     if (item) {
       const pieces = splitSection(lessonSlice(doc, item, req.body.scope));
@@ -1924,7 +2019,7 @@ app.post("/api/ask", async function (req, res) {
 
   // Same question about the same moment = reuse the saved answer
   const key = cacheKey(["ask", mode, level, difficulty, lessonTitle, nowTeaching, question]);
-  const saved = readCache(key);
+  const saved = await readCache(key);
   if (saved) return res.json(Object.assign({}, saved, { cached: true }));
 
   try {
@@ -1936,7 +2031,7 @@ app.post("/api/ask", async function (req, res) {
     });
     const cleaned = cleanLesson({ title: "answer", segments: [out.result.segment] }, sourceText);
     const answer = { segment: cleaned.segments[0] };
-    writeCache(key, answer);
+    await writeCache(key, answer);
     console.log("Answer ready from " + out.model + " (mode: " + mode + ").");
     res.json(Object.assign({}, answer, { model: out.model, cached: false }));
   } catch (error) {
@@ -2032,7 +2127,7 @@ app.post("/api/quiz", async function (req, res) {
   let outcomesText = "";    // what the unit says the learner should achieve: the quiz must cover these
   let practiceText = "";    // self-assessment questions and solutions: the AI may use them as source material
   if (req.body.docId) {
-    const doc = loadDoc(req.body.docId);
+    const doc = await loadDoc(req.body.docId);
     // "sections" = every topic taught so far in this lesson (a unit is several topics in a row)
     const refs = Array.isArray(req.body.sections) && req.body.sections.length
       ? req.body.sections.slice(0, 40)
@@ -2063,7 +2158,7 @@ app.post("/api/quiz", async function (req, res) {
 
   const count = sourceText.length < 1500 ? 4 : sourceText.length < 5000 ? 6 : 8;
   const key = cacheKey(["quiz", level, difficulty, approach, String(round), lessonTitle, sourceText, outcomesText, practiceText]);
-  const saved = readCache(key);
+  const saved = await readCache(key);
   if (saved) return res.json(Object.assign({}, saved, { cached: true }));
 
   const prompt =
@@ -2084,7 +2179,7 @@ app.post("/api/quiz", async function (req, res) {
     const questions = cleanQuiz(out.result);
     if (questions.length < 3) throw new Error("The AI did not produce a usable quiz. Try again.");
     const quiz = { title: lessonTitle, questions: questions };
-    writeCache(key, quiz);
+    await writeCache(key, quiz);
     console.log("Quiz ready from " + out.model + " (" + questions.length + " questions).");
     res.json(Object.assign({}, quiz, { model: out.model, cached: false }));
   } catch (error) {
@@ -2098,7 +2193,9 @@ app.post("/api/quiz", async function (req, res) {
 /* ---------------------------------------------------------
    15. START LISTENING
    --------------------------------------------------------- */
+store.ensureBucket();
 app.listen(PORT, HOST, function () {
+  console.log(store.online ? "Storage: Supabase (saved online, survives the server sleeping; accounts ON)" : "Storage: this computer's folders (docs and cache). Add SUPABASE_URL and SUPABASE_SECRET_KEY to use Supabase.");
   console.log("AI Lecturer server running at http://" + HOST + ":" + PORT);
   console.log(ACCESS_CODE ? "Access code is ON (daily limit " + DAILY_LIMIT + " per visitor)." : "Access code is OFF (fine on your own computer).");
   console.log("Models, in order: " + MODEL_LIST.join(" -> ") + (GROQ_KEY ? " -> " + GROQ_MODELS.map(function (m) { return "groq:" + m; }).join(" -> ") + " (last backup)" : "  (no Groq backup: add GROQ_API_KEY to use one)"));

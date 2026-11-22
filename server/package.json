@@ -9,6 +9,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "pdf-lib": "^1.17.1",
     "unpdf": "^1.9.1"
   }
 }

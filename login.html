@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log in | AI Lecturer</title>
+  <link rel="stylesheet" href="generate.css">
+</head>
+<body>
+  <main class="page">
+    <h1>Welcome</h1>
+    <p class="intro">Log in to keep your PDFs and progress on every phone and computer, and so the lecturer knows your name.</p>
+
+    <!-- Shown when you are already logged in -->
+    <section class="card" id="alreadyCard" hidden>
+      <h2 id="alreadyText"></h2>
+      <div class="form">
+        <a class="btn-generate" style="text-align:center;text-decoration:none" href="generate.html">Continue</a>
+        <button class="btn-generate" id="logoutBtn" type="button" style="background:transparent;color:inherit;border:1px solid var(--line,#ddd)">Log out</button>
+      </div>
+    </section>
+
+    <section class="card" id="formCard">
+      <div class="auth-tabs">
+        <button class="auth-tab is-on" id="tabLogin" type="button">Log in</button>
+        <button class="auth-tab" id="tabSignup" type="button">Create account</button>
+      </div>
+
+      <form id="authForm" class="form">
+        <div class="field" id="nameField" hidden>
+          <label for="nameInput">Your name</label>
+          <input id="nameInput" type="text" autocomplete="given-name" maxlength="40" placeholder="e.g. Jay">
+        </div>
+        <div class="field">
+          <label for="emailInput">Email</label>
+          <input id="emailInput" type="email" autocomplete="email" required placeholder="you@example.com">
+        </div>
+        <div class="field">
+          <label for="passwordInput">Password</label>
+          <input id="passwordInput" type="password" autocomplete="current-password" required minlength="6" placeholder="At least 6 characters">
+        </div>
+        <label class="auth-show"><input type="checkbox" id="showPassword"> Show password</label>
+        <button class="btn-generate" id="authBtn" type="submit">Log in</button>
+        <p class="status" id="authStatus"></p>
+      </form>
+    </section>
+
+    <a class="guest-link" href="generate.html">Continue as a guest (progress stays only in this browser)</a>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>

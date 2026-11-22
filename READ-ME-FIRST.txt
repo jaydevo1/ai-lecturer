@@ -1,0 +1,16 @@
+AI LECTURER, UPDATE 14 (accounts + saving online)
+
+DO THESE IN ORDER
+1. Supabase > SQL Editor > New query. Open supabase-setup.sql from this folder, copy ALL of it, paste, press Run.
+   You should see "Success". (It is safe to run twice.)
+2. Copy every file from this folder over your project folder (replace when asked).
+3. Open config.js and replace PASTE-YOUR-RENDER-ADDRESS-HERE with your real Render address
+   (no slash at the end). You only do this once: no other file holds it any more.
+4. Open server/.env and add these two lines (your own secret key, not shared anywhere):
+      SUPABASE_URL=https://mppvarjcljjprwkblrib.supabase.co
+      SUPABASE_SECRET_KEY=sb_secret_...your secret key...
+      SUPABASE_PUBLISHABLE_KEY=sb_publishable_cufG2ZRMvekuk6mBif-AlQ_ZGZWhlqq
+5. In Render > your service > Environment, add the same three names and values.
+6. Terminal in the server folder: npm start. The first lines should say:
+      Storage: Supabase (saved online, survives the server sleeping; accounts ON)
+7. From the MAIN project folder: git add . / git commit / git push.
