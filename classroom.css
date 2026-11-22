@@ -624,3 +624,61 @@ body {
 .check-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; font-weight: 600; }
 .check-bar[hidden] { display: none; }
 #voiceSelect { max-width: 130px; }
+
+
+/* =========================================================
+   ALWAYS-DARK CLASSROOM (new look)
+   Only colours change here; nothing about how the lesson works.
+   ========================================================= */
+:root {
+  --page: #0b1020;
+  --card: #141b30;
+  --card2: #1a2340;
+  --ink: #eef2ff;
+  --muted: #8d99b8;
+  --line: #263055;
+  --accent: #e8a33d;                 /* kept amber for the progress bar and "Quiz me" glow */
+  --board: #5b8cff;                  /* main button colour */
+  --glass-accent: #8fb8ff;
+  color-scheme: dark;
+}
+body { background: var(--page); color: var(--ink); }
+.topbar { background: var(--card); border-bottom: 1px solid var(--line); }
+.progress-track { background: var(--card2); }
+.progress-fill { background: linear-gradient(90deg, #6ea8ff, #8b7bff); }
+.contents-link { color: #8fb8ff; }
+.stage { border-color: var(--line); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); }
+.tile-photo { box-shadow: 0 0 0 4px rgba(110, 168, 255, 0.35), 0 0 30px rgba(110, 168, 255, 0.6); }
+
+.controls { background: var(--page); border-top: 1px solid var(--line); }
+.btn { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; font-weight: 600; }
+.btn-primary { background: linear-gradient(90deg, #5b8cff, #8b7bff); color: #fff; border: 0; box-shadow: 0 0 22px rgba(110, 168, 255, 0.3); }
+.btn-quiet { background: transparent; }
+.ask-input { background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; }
+.ask-input::placeholder { color: var(--muted); }
+.chip { background: var(--card2); color: var(--ink); border: 1px solid var(--line); }
+.chip-end { color: #ff8d80; border-color: #5a2f2f; }
+.chip-quiz { border-color: var(--accent); }
+.chip-quiz.is-highlight { background: var(--accent); color: #1a1205; }
+select.btn { background: var(--card); color: var(--ink); }
+
+/* the microphone: a clean line icon */
+.btn-mic { display: inline-flex; align-items: center; justify-content: center; color: var(--ink); }
+.btn-mic svg { display: block; }
+.btn-mic.is-listening { color: #fff; }
+
+.check-bar { color: var(--ink); }
+
+/* quiz panel (dark) */
+.quiz-panel { background: rgba(4, 7, 16, 0.82); }
+.quiz-card { background: var(--card); color: var(--ink); border: 1px solid var(--line); }
+.quiz-count { color: var(--muted); }
+.quiz-option { background: var(--card2); border-color: var(--line); color: var(--ink); }
+.quiz-option:disabled { color: var(--ink); }
+.quiz-option.is-correct { background: #123626; border-color: #3f8f5a; }
+.quiz-option.is-wrong   { background: #3a1a1a; border-color: #b3392b; }
+.quiz-feedback { background: var(--card2); color: var(--ink); }
+.quiz-feedback.is-correct { background: #123626; }
+.quiz-feedback.is-wrong   { background: #3a1a1a; }
+.quiz-missed { border-color: var(--line); }
+.quiz-missed-a { color: #6fe0a0; }

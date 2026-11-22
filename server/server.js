@@ -2130,7 +2130,7 @@ app.post("/api/quiz", async function (req, res) {
     const doc = await loadDoc(req.body.docId);
     // "sections" = every topic taught so far in this lesson (a unit is several topics in a row)
     const refs = Array.isArray(req.body.sections) && req.body.sections.length
-      ? req.body.sections.slice(0, 40)
+      ? req.body.sections.slice(0, 80)
       : [{ sectionId: req.body.sectionId, part: req.body.part, scope: req.body.scope }];
     const pieces = [];
     let firstItem = null;
@@ -2156,14 +2156,18 @@ app.post("/api/quiz", async function (req, res) {
   if (!sourceText) sourceText = String(req.body.lessonText || "").slice(0, 12000);
   if (sourceText.length < 80) return res.status(400).json({ error: "There is not enough lesson text to make a quiz from." });
 
-  const count = sourceText.length < 1500 ? 4 : sourceText.length < 5000 ? 6 : 8;
-  const key = cacheKey(["quiz", level, difficulty, approach, String(round), lessonTitle, sourceText, outcomesText, practiceText]);
+  let count = sourceText.length < 1500 ? 4 : sourceText.length < 5000 ? 6 : 8;
+  // Big quizzes ask for a set size (3 to 15 per request) and send the questions already used, so none repeat
+  if (Number(req.body.count) >= 3) count = Math.min(Math.floor(Number(req.body.count)), 15);
+  const avoid = Array.isArray(req.body.avoid) ? req.body.avoid.slice(0, 60).map(function (q) { return String(q).slice(0, 140); }) : [];
+  const key = cacheKey(["quiz", level, difficulty, approach, String(round), lessonTitle, sourceText, outcomesText, practiceText, String(count), avoid.join("|")]);
   const saved = await readCache(key);
   if (saved) return res.json(Object.assign({}, saved, { cached: true }));
 
   const prompt =
     "Learner level: " + level + "\nDifficulty: " + difficulty + "\nLesson: " + lessonTitle + "\n" +
     "Write " + count + " questions." + (round > 0 ? " This is attempt " + (round + 1) + ": ask DIFFERENT questions from a typical first quiz, covering other details." : "") +
+    (avoid.length ? "\nQuestions already asked (do NOT repeat or rephrase any of them):\n- " + avoid.join("\n- ") + "\n" : "") +
     (approach === "exam" || approach === "revision" ? " Exam style: prefer questions on exact definitions, terms and lists in the material." : "") +
     (outcomesText ? '\n\nLearning outcomes of this unit (the quiz must cover them):\n"""\n' + outcomesText + '\n"""' : "") +
     (practiceText ? '\n\nPractice questions and solutions from the material (use them as extra source material; adapt them, do not copy them blindly):\n"""\n' + practiceText + '\n"""' : "") +

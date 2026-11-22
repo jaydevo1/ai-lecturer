@@ -5,14 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Make a lesson | AI Lecturer</title>
   <link rel="stylesheet" href="generate.css">
+  <link rel="stylesheet" href="theme.css">
+  <script src="theme.js"></script>
 </head>
-<body>
+<body data-nav="home">
   <main class="page">
     <!-- who is using this: guest or logged in (common.js fills it) -->
     <div class="account-bar" id="accountBar" hidden></div>
 
-    <h1>Make a lesson</h1>
+    <h1 id="pageGreeting">Make a lesson</h1>
     <p class="intro">Upload your course material and pick a section to be taught, or paste some text.</p>
+
+    <!-- Back to the last course you opened (theme.js shows it when there is one) -->
+    <a class="continue-card" id="continueCard" href="outline.html" hidden>
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+      <span>Continue where you stopped<small>Open your last course</small></span>
+    </a>
 
     <!-- Material uploaded before: tap one to go straight to its contents (generate.js fills this in) -->
     <section class="card" id="savedCard" hidden>

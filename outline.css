@@ -141,3 +141,7 @@ select[hidden] { display: none; }
 }
 .approach-btn.is-on { background: var(--board); color: #fff; border-color: var(--board); }
 .approach-note { font-size: 0.8rem; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+
+/* Quiz buttons */
+.btn.mini { padding: 4px 10px; min-height: 30px; font-size: 0.78rem; margin-left: 8px; }
+.whole-quiz { margin: 0 0 12px; }

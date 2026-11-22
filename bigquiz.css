@@ -1,0 +1,26 @@
+/* Big quiz page: uses the colours from theme.css (light by default, dark when switched) */
+.bq-card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 12px; }
+.bq-card[hidden] { display: none; }
+.bq-count { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.bq-bar { height: 6px; background: var(--card2); border-radius: 3px; overflow: hidden; }
+.bq-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.3s; }
+.bq-question { font-size: 1.15rem; line-height: 1.35; }
+.bq-options { display: flex; flex-direction: column; gap: 8px; }
+.bq-option { text-align: left; padding: 12px 14px; min-height: 48px; border: 1px solid var(--line); border-radius: 14px; background: var(--card2); color: var(--ink); font: inherit; cursor: pointer; }
+.bq-option:disabled { cursor: default; opacity: 1; color: var(--ink); }
+.bq-option.is-correct { background: var(--good-bg); border-color: var(--good); }
+.bq-option.is-wrong { background: var(--bad-bg); border-color: var(--bad); }
+.bq-feedback { padding: 10px 12px; border-radius: 12px; background: var(--card2); line-height: 1.4; }
+.bq-feedback[hidden] { display: none; }
+.bq-feedback.is-correct { background: var(--good-bg); }
+.bq-feedback.is-wrong { background: var(--bad-bg); }
+.bq-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.bq-actions a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+.bq-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+.bq-row .name { flex: 1; }
+.bq-row .pct { font-weight: 600; white-space: nowrap; }
+.bq-row.is-weak .pct { color: var(--bad); }
+.bq-missed { padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.bq-missed p { margin: 0 0 4px; }
+.bq-right { color: var(--good); font-size: 0.9rem; }
+select#sizeSelect { padding: 10px; min-height: 44px; font: inherit; }

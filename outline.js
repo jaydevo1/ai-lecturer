@@ -94,6 +94,41 @@ function makeButton(label, className, onClick) {
 }
 
 
+/* ---------- big quizzes: every topic (and part) under a node ---------- */
+function leafRefs(node) {
+  if (isLeaf(node)) {
+    const refs = [];
+    for (let part = 0; part < node.parts; part++) refs.push({ sectionId: node.id, part: part, title: node.title });
+    return refs;
+  }
+  let all = [];
+  node.children.forEach(function (child) { all = all.concat(leafRefs(child)); });
+  return all;
+}
+
+function openBigQuiz(title, nodes) {
+  let topics = [];
+  nodes.forEach(function (n) { topics = topics.concat(leafRefs(n)); });
+  if (topics.length === 0) return;
+  try {
+    sessionStorage.setItem("bigQuiz", JSON.stringify({ docId: docId, title: title, topics: topics, prefs: getPrefs() }));
+  } catch (error) { /* fine */ }
+  window.location.href = "bigquiz.html";
+}
+
+// A small Quiz button inside a module/unit heading (does not open or close the card)
+function quizButtonFor(title, nodes) {
+  const button = makeEl("button", "btn secondary mini", "Quiz");
+  button.type = "button";
+  button.addEventListener("click", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    openBigQuiz(title, nodes);
+  });
+  return button;
+}
+
+
 /* ---------- drawing the tree ---------- */
 function renderTopic(node, siblings) {
   const done = doneIds.includes(node.id);
@@ -112,6 +147,7 @@ function renderUnit(node) {
   summary.append(makeEl("span", "summary-title", node.title));
   const doneCount = node.children.filter(function (c) { return doneIds.includes(c.id); }).length;
   summary.append(makeEl("span", "meta", doneCount + " of " + node.children.length + " generated"));
+  summary.append(quizButtonFor(node.title, [node]));
   details.append(summary);
 
   node.children.forEach(function (child) { details.append(renderTopic(child, node.children)); });
@@ -135,6 +171,7 @@ function renderNode(node) {
   const summary = makeEl("summary", "");
   summary.append(makeEl("span", "summary-title", node.title));
   summary.append(makeEl("span", "meta", "p. " + node.page));
+  summary.append(quizButtonFor(node.title, [node]));
   details.append(summary);
   node.children.forEach(function (child) { details.append(renderNode(child)); });
   return details;
@@ -142,6 +179,9 @@ function renderNode(node) {
 
 function drawTree(outline) {
   treeEl.replaceChildren();
+  const wholeRow = makeEl("div", "whole-quiz");
+  wholeRow.append(makeButton("Quiz me on the whole course", "btn", function () { openBigQuiz(courseName || "Whole course", outline); }));
+  treeEl.append(wholeRow);
   outline.forEach(function (node) { treeEl.append(renderNode(node)); });
 }
 

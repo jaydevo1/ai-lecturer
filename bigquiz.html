@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quiz | AI Lecturer</title>
+  <link rel="stylesheet" href="outline.css">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="bigquiz.css">
+  <script src="theme.js"></script>
+</head>
+<body data-nav="quizzes">
+  <header class="topbar">
+    <a class="back-link" id="backLink" href="outline.html">&larr; Back to contents</a>
+    <p class="topbar-label">Quiz</p>
+    <h1 class="topbar-title" id="quizTitle">Loading...</h1>
+  </header>
+
+  <main class="page">
+    <!-- 1. choose the size -->
+    <section class="bq-card" id="setup">
+      <p id="setupInfo"></p>
+      <div class="field">
+        <label for="sizeSelect">How many questions?</label>
+        <select id="sizeSelect">
+          <option value="10">10 (quick check)</option>
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100 (full test)</option>
+        </select>
+      </div>
+      <p class="hint" id="costNote"></p>
+      <button class="btn" id="startBtn" type="button">Start quiz</button>
+    </section>
+
+    <!-- 2. the quiz -->
+    <section class="bq-card" id="play" hidden>
+      <p class="bq-count" id="bqCount"></p>
+      <div class="bq-bar"><div class="bq-fill" id="bqFill"></div></div>
+      <h2 class="bq-question" id="bqQuestion"></h2>
+      <div class="bq-options" id="bqOptions"></div>
+      <div class="bq-feedback" id="bqFeedback" hidden></div>
+      <div class="bq-actions" id="bqActions"></div>
+    </section>
+
+    <!-- 3. the result -->
+    <section class="bq-card" id="result" hidden>
+      <h2 id="resultScore"></h2>
+      <p id="resultMessage"></p>
+      <h3>By topic</h3>
+      <div id="topicBreakdown"></div>
+      <h3 id="missedHead">Questions you missed</h3>
+      <div id="missedList"></div>
+      <div class="bq-actions" id="resultActions"></div>
+    </section>
+
+    <p class="hint" id="bqNote"></p>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="bigquiz.js"></script>
+</body>
+</html>
