@@ -100,7 +100,8 @@
       greet.textContent = first ? part + ", " + first : "Welcome";
     }
     var cont = document.getElementById("continueCard");
-    if (cont && lastDoc()) { cont.href = "outline.html?doc=" + encodeURIComponent(lastDoc()); cont.hidden = false; }
+    if (cont && lastDoc()) { var lt = ""; try { lt = localStorage.getItem("lastTopic:" + lastDoc()) || ""; } catch (e) { /* fine */ }
+      cont.href = "outline.html?doc=" + encodeURIComponent(lastDoc()) + (lt ? "&at=" + encodeURIComponent(lt) : ""); cont.hidden = false; }
 
     /* ---- bottom menu ---- */
     var doc = lastDoc();

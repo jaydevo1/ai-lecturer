@@ -187,6 +187,41 @@ function drawTree(outline) {
 
 let currentOutline = [];
 
+// Open the module > unit that holds a topic, scroll to it and mark it "You are here"
+function findPath(nodes, id, trail) {
+  for (const node of nodes) {
+    if (node.id === id) return trail.concat(node);
+    const found = findPath(node.children || [], id, trail.concat(node));
+    if (found) return found;
+  }
+  return null;
+}
+function showPlace(id) {
+  if (!id) return;
+  const path = findPath(currentOutline, id, []);
+  if (!path) return;
+  const titles = path.map(function (n) { return n.title; });
+  const cards = Array.from(treeEl.querySelectorAll("details"));
+  // open every card on the way down (modules first, then the unit)
+  titles.forEach(function (title) {
+    const card = cards.find(function (d) {
+      const t = d.querySelector(":scope > summary .summary-title");
+      return t && t.textContent === title && !d.open;
+    });
+    if (card) card.open = true;
+  });
+  const leaf = Array.from(treeEl.querySelectorAll(".leaf")).find(function (row) {
+    const t = row.querySelector(".leaf-title");
+    return t && t.textContent === titles[titles.length - 1];
+  });
+  const target = leaf || treeEl.querySelector("details[open]");
+  if (leaf) {
+    leaf.classList.add("is-here");
+    leaf.insertBefore(makeEl("span", "here-tag", "You are here"), leaf.children[1] || null);
+  }
+  if (target) setTimeout(function () { target.scrollIntoView({ block: "center", behavior: "smooth" }); }, 80);
+}
+
 async function loadOutline() {
   if (!docId) {
     docTitleEl.textContent = "No document yet";
@@ -211,6 +246,7 @@ async function loadOutline() {
     currentOutline = data.outline;
     doneIds = await getDoneAsync(docId);
     drawTree(currentOutline);
+    showPlace(params.get("at"));
   } catch (error) {
     console.error(error);
     docTitleEl.textContent = "Could not load";

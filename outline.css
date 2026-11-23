@@ -145,3 +145,6 @@ select[hidden] { display: none; }
 /* Quiz buttons */
 .btn.mini { padding: 4px 10px; min-height: 30px; font-size: 0.78rem; margin-left: 8px; }
 .whole-quiz { margin: 0 0 12px; }
+
+.leaf.is-here { border-color: var(--accent, #c8963e); box-shadow: 0 0 0 2px var(--accent, #c8963e) inset; }
+.here-tag { font-size: 0.72rem; font-weight: 700; color: #2b2118; background: var(--accent, #c8963e); padding: 2px 8px; border-radius: 99px; white-space: nowrap; }

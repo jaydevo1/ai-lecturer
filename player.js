@@ -165,6 +165,22 @@ async function loadLesson() {
       contentsLinkEl.hidden = false;
     }
 
+    // Contents button: open the contents page right at the topic you are on (module > unit > topic)
+    contentsLinkEl.addEventListener("click", function () {
+      if (!lesson.docId) return;
+      const entry = playlist && playlist.entries ? playlist.entries[playlist.index || 0] : null;
+      const at = (entry && entry.sectionId) || lesson.sectionId || "";
+      if (at) {
+        try { localStorage.setItem("lastTopic:" + lesson.docId, at); } catch (e) { /* fine */ }
+        contentsLinkEl.href = "outline.html?doc=" + encodeURIComponent(lesson.docId) + "&at=" + encodeURIComponent(at);
+      }
+    });
+    {
+      const e0 = lesson.playlist && lesson.playlist.entries ? lesson.playlist.entries[0] : null;
+      const at0 = (e0 && e0.sectionId) || lesson.sectionId || "";
+      if (lesson.docId && at0) { try { localStorage.setItem("lastTopic:" + lesson.docId, at0); } catch (e) { /* fine */ } }
+    }
+
     showSegment(0, false);
     setReadyState();
 
