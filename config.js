@@ -5,7 +5,7 @@
    ========================================================= */
 window.APP_CONFIG = {
   // Your Render server address (no slash at the end), e.g. "https://ai-lecturer-abcd.onrender.com"
-  serverUrl: "https://PASTE-YOUR-RENDER-ADDRESS-HERE.onrender.com",
+  serverUrl: "https://ai-lecturer-b0qs.onrender.com",
 
   // Supabase (accounts). These two are meant to be public, they are safe to keep here.
   supabaseUrl: "https://mppvarjcljjprwkblrib.supabase.co",
