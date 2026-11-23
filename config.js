@@ -12,7 +12,7 @@ window.APP_CONFIG = {
   supabaseKey: "sb_publishable_cufG2ZRMvekuk6mBif-AlQ_ZGZWhlqq",
 
   // Your Google Form link for feedback. Leave "" and the Feedback link stays hidden.
-  feedbackUrl: "",
+  feedbackUrl: "https://forms.gle/ovFv9r6sropM59Eu7",
 
   // Where the "reset password" email sends people (must also be added in Supabase > Authentication > URL Configuration)
   resetPageUrl: "https://jaydevo1.github.io/ai-lecturer/reset.html"
