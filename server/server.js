@@ -1081,7 +1081,7 @@ function findHeadingCandidates(text, pageStarts) {
 
   // Contents pages: lines like "Unit 2 Basic Concepts ............ 9" (dots, then a page number).
   // Where several of them sit close together, that whole stretch is a contents page, not real headings.
-  const tocLine = /(\.{3,}|\u2026+|(\.\s){4,})\s*\d{1,3}\s*$/;
+  const tocLine = /([.\u2026]{3,}|(\.\s){4,})\s*\d{1,3}\s*$/;
   const tocHits = [0];
   lines.forEach(function (l, i) { tocHits.push(tocHits[i] + (tocLine.test(l.line) ? 1 : 0)); });
   function inContents(i) {
@@ -1158,7 +1158,7 @@ function kindByRules(line) {
   if (new RegExp("^(module|unit|chapter)\\s+(\\d+|[ivx]+|" + NUMBER_WORDS + ")\\b", "i").test(t)) return null;
   const s = stripNumbering(t);
 
-  if (/^(references?|further reading|web resources|bibliography|suggested reading|recommended reading)\b/i.test(s)) return "references";
+  if (/^(references?|further readings?|set textbooks?|web resources|bibliography|suggested reading|recommended reading)\b/i.test(s)) return "references";
   if (/(self[-\s]?assessment|tutor[-\s]?marked|assessment exercise|\bexercises?\b|\bassignments?\b|practice questions?|review questions?)/i.test(s)) return "exercise";
   if (/^(solutions?|answers?|model answers?)\b/i.test(s)) return "exercise";
   if (/^(intended\s+|learning\s+|unit\s+)?(learning\s+)?(outcomes?|objectives?)\b/i.test(s)) return "outcomes";
@@ -1217,6 +1217,8 @@ const ACRONYMS = ["cpu", "ram", "rom", "ict", "vdu", "dc", "ac", "lan", "wan", "
 // "BASIC CONCEPTS" -> "Basic Concepts" (only when the whole line is in capitals)
 function tidyTitle(title) {
   let t = title.replace(/\s+/g, " ").trim();
+  // some PDFs lose the spaces between words: "ProgrammingConcepts", "Proofof Divide"
+  t = t.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([a-z]{2,})(of|and|the)(?=[A-Z])/g, "$1 $2 ").replace(/\s+/g, " ").trim();
   const letters = t.replace(/[^A-Za-z]/g, "");
   if (letters.length >= 4 && letters === letters.toUpperCase()) {
     const small = ["of", "and", "the", "in", "to", "for", "a", "an", "on", "or", "with", "at", "by"];
@@ -1227,6 +1229,302 @@ function tidyTitle(title) {
     }).join(" ");
   }
   return t.slice(0, 90);
+}
+
+
+/* ---------------------------------------------------------
+   UNIT-FIRST OUTLINE (no AI) - works for every NOUN layout we have seen
+   The old reader trusted every "Module 3 ..." or "Unit 2 ..." line. Real PDFs differ:
+     - a module page lists its units, and the course guide also mentions "Module 3 provides ..."
+     - some PDFs have no modules, or print "MODULE ONE" at the top of every page
+     - unit headings may be on one line, or "UNIT 1" with the title on the next line
+     - topics are numbered 3.1, 3.2 in most units, but 1.3, 2.4 or 4.5 in others
+   So this reader works in this order:
+     1. real UNIT headings (a unit heading is followed by a lot of text; a list entry is not),
+     2. modules = where the unit numbers start again at 1 (named from a nearby "Module N: title" line),
+     3. topics inside each unit = numbered lines with the unit's own number (3.x, or 1.x ...), in order.
+   --------------------------------------------------------- */
+const WORD_NUMS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+const HEAD_RE = new RegExp("^(unit|module)\\s*(\\d+|[ivx]+|" + NUMBER_WORDS + ")\\b[\\s:.\\-\\u2013\\u2014]*(.*)$", "i");
+const TOC_LINE = /(\.{3,}|…+|(\.\s){4,})\s*\d{0,3}\s*$/;
+
+function headNumber(word) {
+  const w = word.toLowerCase();
+  if (/^\d+$/.test(w)) return parseInt(w, 10);
+  if (WORD_NUMS[w]) return WORD_NUMS[w];
+  const roman = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10 };
+  return roman[w] || 0;
+}
+
+// Is this the end of a heading that wraps onto another line? (ALL CAPS and short)
+function isCapsLine(l) {
+  const letters = l.replace(/[^A-Za-z]/g, "");
+  return letters.length >= 3 && letters === letters.toUpperCase() && l.length <= 70;
+}
+
+// "Unit 4 Flowcharting Techniques" / "UNIT 1" + next line title / "Module 3: Sorting" -> {kind, num, title} or null
+let RUNNING = {};            // lines that repeat on many pages (set by unitFirstOutline)
+function parseGroupHeading(lines, i) {
+  const line = lines[i].line.replace(/^((?:unit|module)\s*\d+)[Oo]\b/i, "$10");      // "UNIT 2O" is a typo for 20
+  const m = line.match(HEAD_RE);
+  if (!m) return null;
+  const kind = m[1].toLowerCase();
+  const num = headNumber(m[2]);
+  if (!num) return null;
+  let title = m[3].replace(/[\s:.\-–—]+$/g, "").replace(/^[\s:.\-–—]+/, "").trim();
+
+  // sentences from the course guide or the text ("Module 3 provides ...", "Unit 1 Module 2, you were introduced ...")
+  const words = title ? title.split(/\s+/).length : 0;
+  if (words > 12) return null;
+  if (/\b(you|we|this|these|those|will|were|was|provides?|introduces?|discuss(es)?|covers?|concludes?|deals?|describes?)\b/i.test(title)) return null;
+  if (title.includes(",") && words > 5 && !looksLikeTitle(title)) return null;
+  if (/^[a-z]/.test(title)) return null;               // a real title starts with a capital: "Unit 4 ... once again. Summarise ..." is a sentence
+  if (TOC_LINE.test(line)) return null;
+
+  // the title is on the next line(s): "UNIT 1" / "ELECTRIC CHARGE, FORCE AND FIELD"
+  let used = 0;
+  if (!title) {
+    for (let k = i + 1; k < Math.min(lines.length, i + 4); k++) {
+      const next = lines[k].line;
+      if (!next) continue;
+      if (RUNNING[next.toLowerCase()]) continue;                  // a page header such as "PHY 121 ELECTRICITY, MAGNETISM ..."
+      const cleaned = next.replace(/[\s:.]+$/g, "");
+      const okTitle = next.length <= 90 && !TOC_LINE.test(next) && !HEAD_RE.test(next) && /^[A-Z]/.test(next) &&
+        !/^(table of )?contents$/i.test(next) && looksLikeTitle(cleaned) && !/[;,]$/.test(cleaned);
+      if (okTitle) { title = cleaned; used = k - i; }
+      break;
+    }
+    if (!title && kind === "module") return null;                // a bare "MODULE TWO" (a page header) is not a heading
+  }
+  // a title in capitals that wraps onto a second line: "WRITING PARAGRAPHS: TOPIC SENTENCE" / "AND COHERENCE"
+  if (title && isCapsLine(title)) {
+    for (let k = i + 1 + used; k < Math.min(lines.length, i + 3 + used); k++) {
+      const next = lines[k].line;
+      if (!next) continue;
+      if (isCapsLine(next) && !HEAD_RE.test(next) && !/^\d/.test(next) && !/^(table of )?contents$/i.test(next) && !TOC_LINE.test(next)) title += " " + next.replace(/[\s:.]+$/g, "");
+      break;
+    }
+  }
+  return { kind: kind, num: num, title: title.slice(0, 100) };
+}
+
+// "Introduction toSorting andDivide-and-Conquer" and "INTRODUCTIONTOSORTINGANDDIVIDE AND-CONQUERALGORITHMS" are the same title
+function sameTitle(a, b) {
+  const x = normKey(a), y = normKey(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const n = Math.min(x.length, y.length);
+  return n >= 12 && (x.startsWith(y.slice(0, n)) || y.startsWith(x.slice(0, n)));
+}
+
+// Title-like: in capitals, or most words start with a capital (a body sentence does not)
+function looksLikeTitle(t) {
+  if (isCapsLine(t)) return true;
+  const words = t.split(/\s+/).filter(function (w) { return w.length > 3; });
+  if (words.length === 0) return true;
+  const caps = words.filter(function (w) { return /^[A-Z]/.test(w); }).length;
+  return caps / words.length >= 0.6;
+}
+
+// Some PDFs lose the spaces between words ("BASICDATATYPES", "Levelsof Programming"). The document's own sentences
+// tell us which words exist, so a glued word is split only when every piece is a word the text really uses.
+function buildVocab(text) {
+  const vocab = {};
+  text.split("\n").forEach(function (line) {
+    if (line.length < 45) return;                      // sentences only: titles are the broken ones
+    (line.toLowerCase().match(/[a-z]+/g) || []).forEach(function (w) { vocab[w] = (vocab[w] || 0) + 1; });
+  });
+  return vocab;
+}
+
+function splitGlued(token, vocab) {
+  const low = token.toLowerCase();
+  if (low.length < 8 || vocab[low]) return null;
+  const n = low.length;
+  const best = new Array(n + 1).fill(null);
+  best[0] = [];
+  for (let end = 1; end <= n; end++) {
+    for (let start = Math.max(0, end - 14); start < end; start++) {
+      if (!best[start]) continue;
+      const piece = low.slice(start, end);
+      const ok = (piece.length >= 2 && vocab[piece] >= 2) || piece === "a";
+      if (!ok) continue;
+      const candidate = best[start].concat([end - start]);
+      if (!best[end] || candidate.length < best[end].length) best[end] = candidate;
+    }
+  }
+  if (!best[n] || best[n].length < 2 || best[n].length > 5) return null;
+  const out = [];
+  let at = 0;
+  best[n].forEach(function (len) { out.push(token.slice(at, at + len)); at += len; });
+  return out.join(" ");
+}
+
+function fixGlued(title, vocab) {
+  return title.split(/(\s+)/).map(function (tok) {
+    const clean = tok.replace(/[^A-Za-z]/g, "");
+    if (clean.length < 8 || clean !== tok) return tok;
+    return splitGlued(tok, vocab) || tok;
+  }).join("");
+}
+
+function unitFirstOutline(text, pageStarts) {
+  const candidates = findHeadingCandidates(text, pageStarts);
+  const lines = candidates.map(function (c) { return { offset: c.offset, line: c.line, page: c.page }; });
+
+  // every line of the text (a title can wrap onto a line that does not look like a heading by itself)
+  const allLines = [];
+  const lineAt = {};
+  let pos = 0;
+  text.split("\n").forEach(function (raw) {
+    lineAt[pos] = allLines.length;
+    allLines.push({ offset: pos, line: raw.trim() });
+    pos += raw.length + 1;
+  });
+
+  // lines that repeat many times are page headers/footers, never titles
+  const freq = {};
+  allLines.forEach(function (l) { if (l.line) { const k = l.line.toLowerCase(); freq[k] = (freq[k] || 0) + 1; } });
+  RUNNING = {};
+  Object.keys(freq).forEach(function (k) { if (freq[k] >= 4 && k.length > 8) RUNNING[k] = true; });
+
+  // ---- 1. unit and module headings
+  const heads = [];
+  lines.forEach(function (l) {
+    const idx = lineAt[l.offset];
+    if (idx === undefined) return;
+    const h = parseGroupHeading(allLines, idx);
+    if (h) heads.push({ offset: l.offset, page: l.page, kind: h.kind, num: h.num, title: h.title, lineLength: l.line.length });
+  });
+  heads.forEach(function (h, i) {
+    h.own = (i + 1 < heads.length ? heads[i + 1].offset : text.length) - h.offset;
+  });
+
+  // a real unit heading has plenty of text under it; a list entry on a module page does not
+  const units = [];
+  heads.filter(function (h) { return h.kind === "unit" && h.own >= 400; }).forEach(function (h) {
+    const last = units[units.length - 1];
+    // the same unit printed again (a running page header) - unless it is a differently named unit with a repeated number
+    // (a typo in some PDFs: "Unit 2" twice in a row)
+    if (last && last.num === h.num && (normKey(last.title) === normKey(h.title) || !h.title || !looksLikeTitle(h.title))) return;
+    units.push(h);
+  });
+  // the first real unit is "Unit 1": anything before it is a stray line from the course guide
+  const firstOne = units.findIndex(function (u) { return u.num === 1; });
+  if (firstOne > 0) units.splice(0, firstOne);
+  if (units.length < 2) return null;
+
+  // a long "MODULE 8: Volume of solids ..." heading with no units under it is really a unit of its own (sloppy PDFs)
+  if (units.length) {
+    const titles = units.map(function (u) { return normKey(u.title); });
+    heads.filter(function (h) {
+      return h.kind === "module" && h.own >= 1500 && h.offset > units[0].offset && titles.indexOf(normKey(h.title)) < 0 &&
+        !heads.some(function (o) { return o.kind === "unit" && o.offset > h.offset && o.offset < h.offset + 900; }) &&
+        !units.some(function (u) { return Math.abs(u.offset - h.offset) < 900; });
+    }).forEach(function (h) {
+      const prev = units.filter(function (u) { return u.offset < h.offset; }).pop();
+      if (!prev) return;
+      units.push({ offset: h.offset, page: h.page, kind: "unit", num: prev.num + 1, title: h.title, own: h.own });
+    });
+    units.sort(function (a, b) { return a.offset - b.offset; });
+  }
+
+
+  // a list entry for the same unit often has the better spelling ("Introduction toProgramming" vs "INTRODUCTIONTOPROGRAMMING")
+  units.forEach(function (u) {
+    const listed = heads.find(function (h) {
+      return h.kind === "unit" && h.num === u.num && h.own < 400 && h.offset < u.offset && sameTitle(h.title, u.title) && h.title !== u.title;
+    });
+    if (listed && /[a-z]/.test(listed.title)) u.title = listed.title;
+  });
+  units.forEach(function (u) {
+    if (u.title) return;
+    // a unit whose title is not printed above it (page header only): use the contents list entry with the same number
+    const listed = heads.filter(function (h) { return h.kind === "unit" && h.num === u.num && h.title && h.offset < u.offset && units.indexOf(h) < 0; }).pop();
+    if (listed) u.title = listed.title;
+  });
+  units.forEach(function (u) { u.title = u.title.replace(/\s+contents$/i, "").replace(/[.\u2026]+\s*\d*$/, ""); });
+
+  // ---- 2. modules = the unit numbers start again
+  const groups = [];
+  units.forEach(function (u, i) {
+    if (i > 0 && u.num === units[i - 1].num && u.num > 1) u.num = units[i - 1].num + 1;     // "Unit 2" printed twice: the second is really the next unit
+    if (i === 0 || u.num <= units[i - 1].num) groups.push([]);
+    groups[groups.length - 1].push(u);
+  });
+  const vocab = buildVocab(text);
+  const raw = [];
+  if (groups.length >= 2) {
+    groups.forEach(function (g, gi) {
+      const first = g[0];
+      const before = first.offset - 900;
+      const named = heads.filter(function (h) {
+        return h.kind === "module" && h.num === gi + 1 && h.offset >= before && h.offset < first.offset && h.title;
+      }).pop();
+      raw.push({
+        offset: named ? named.offset : Math.max(0, first.offset - 1),
+        title: tidyTitle("Module " + (gi + 1) + (named ? ": " + fixGlued(named.title, vocab) : "")),
+        kind: "module", page: named ? named.page : first.page
+      });
+    });
+  }
+  units.forEach(function (u) {
+    raw.push({ offset: u.offset, title: tidyTitle("Unit " + u.num + (u.title ? ": " + fixGlued(u.title, vocab) : "")), kind: "unit", page: u.page });
+  });
+
+  // ---- 3. topics and special sections inside each unit
+  units.forEach(function (u, ui) {
+    const end = ui + 1 < units.length ? units[ui + 1].offset : text.length;
+    const inside = lines.filter(function (l) { return l.offset > u.offset && l.offset < end; });
+    inside.forEach(function (l, i) { l.own = (i + 1 < inside.length ? inside[i + 1].offset : end) - l.offset; });
+
+    const numbered = [];
+    inside.forEach(function (l) {
+      const m = l.line.match(/^(\d{1,2})\.(\d{1,2})\.?\s+(.*)$/);
+      if (!m || /^\d/.test(m[3])) return;                              // "3.0 x 10 -3m", or a deeper 3.1.2
+      const title = m[3].trim();
+      const kind = kindByRules(l.line);
+      if (kind) return;                                               // introduction, objectives, summary ... (handled below)
+      const k = parseInt(m[2], 10);
+      const words = title.split(/\s+/).length;
+      if (k < 1 || words > 12 || !/^[A-Za-z]/.test(title) || title.includes("=")) return;
+      if (/^(x|may|will|is|are|can|has|have|the following|shown|given|as shown)\b/i.test(title)) return;
+      if (/[.,;]$/.test(title) && words > 6) return;
+      if (TOC_LINE.test(l.line)) return;
+      numbered.push({ major: parseInt(m[1], 10), k: k, title: title, offset: l.offset, page: l.page, own: l.own });
+    });
+
+    // the unit's own number: the most common one (3.x in most NOUN units, 1.x or 4.x in others)
+    const counts = {};
+    numbered.forEach(function (n) { counts[n.major] = (counts[n.major] || 0) + 1; });
+    let major = null;
+    Object.keys(counts).forEach(function (key) {
+      if (major === null || counts[key] > counts[major] || (counts[key] === counts[major] && Number(key) === 3)) major = key;
+    });
+    const mine = numbered.filter(function (n) { return String(n.major) === String(major); });
+
+    // the same number appears in the unit's contents list and again where it is taught: keep the one with the text
+    const best = {};
+    mine.forEach(function (n) { if (!best[n.k] || n.own > best[n.k].own) best[n.k] = n; });
+    let lastK = 0;
+    Object.keys(best).map(function (k) { return best[k]; })
+      .sort(function (a, b) { return a.offset - b.offset; })
+      .forEach(function (n) {
+        if (n.k <= lastK || n.k > lastK + 4 || (lastK === 0 && n.k > 5)) return;
+        lastK = n.k;
+        raw.push({ offset: n.offset, title: tidyTitle(fixGlued(n.title, vocab)), kind: "topic", page: n.page });
+      });
+
+    // introduction / objectives / summary / exercises / references: used while teaching, never listed
+    inside.forEach(function (l) {
+      const kind = kindByRules(l.line);
+      if (kind && kind !== "merge" && !TOC_LINE.test(l.line)) raw.push({ offset: l.offset, title: l.line.slice(0, 90), kind: kind, page: l.page });
+    });
+  });
+
+  const items = buildItems(raw, text);
+  const structural = items.filter(isStructural);
+  return structural.length >= 3 ? items : null;
 }
 
 function ruleBasedOutline(text, pageStarts) {
@@ -1272,7 +1570,14 @@ function ruleBasedOutline(text, pageStarts) {
 }
 
 async function buildOutline(text, pageStarts, docName) {
-  // First choice: read the NOUN layout with plain rules (fast, free, and nothing goes missing)
+  // First choice: read the units, then the modules and topics around them (fast, free, no AI)
+  const unitFirst = unitFirstOutline(text, pageStarts);
+  if (unitFirst) {
+    console.log("Outline built by rules (unit-first).");
+    return { items: unitFirst, courseTitle: "", source: "rules (unit-first)" };
+  }
+
+  // Second choice: the older reader for the plain NOUN layout
   const byRules = ruleBasedOutline(text, pageStarts);
   if (byRules && byRules.filter(isStructural).length >= 3) {
     console.log("Outline built by rules (module / unit / numbered topics).");

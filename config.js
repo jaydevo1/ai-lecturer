@@ -5,9 +5,15 @@
    ========================================================= */
 window.APP_CONFIG = {
   // Your Render server address (no slash at the end), e.g. "https://ai-lecturer-abcd.onrender.com"
-  serverUrl: "https://ai-lecturer-b0qs.onrender.com",
+  serverUrl: "https://PASTE-YOUR-RENDER-ADDRESS-HERE.onrender.com",
 
   // Supabase (accounts). These two are meant to be public, they are safe to keep here.
   supabaseUrl: "https://mppvarjcljjprwkblrib.supabase.co",
-  supabaseKey: "sb_publishable_cufG2ZRMvekuk6mBif-AlQ_ZGZWhlqq"
+  supabaseKey: "sb_publishable_cufG2ZRMvekuk6mBif-AlQ_ZGZWhlqq",
+
+  // Your Google Form link for feedback. Leave "" and the Feedback link stays hidden.
+  feedbackUrl: "",
+
+  // Where the "reset password" email sends people (must also be added in Supabase > Authentication > URL Configuration)
+  resetPageUrl: "https://jaydevo1.github.io/ai-lecturer/reset.html"
 };

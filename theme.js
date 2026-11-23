@@ -81,6 +81,13 @@
       avatar.href = "login.html"; avatar.textContent = "Log in"; avatar.className = "shell-login";
       tools.append(toggle, avatar);
     }
+    var fbUrl = window.APP_CONFIG && window.APP_CONFIG.feedbackUrl;
+    if (fbUrl) {
+      var fb = document.createElement("a");
+      fb.className = "shell-feedback"; fb.href = fbUrl; fb.target = "_blank"; fb.rel = "noopener";
+      fb.textContent = "Feedback";
+      tools.prepend(fb);
+    }
     top.append(brand, tools);
     document.body.prepend(top);
 

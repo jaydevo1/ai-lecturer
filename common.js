@@ -191,6 +191,31 @@ async function authLogIn(email, password) {
   return session;
 }
 
+// Forgot password: Supabase emails a link that opens the reset page
+async function authRecover(email) {
+  const redirect = APP_CONFIG.resetPageUrl || (location.origin + location.pathname.replace(/[^\/]*$/, "") + "reset.html");
+  const headers = { "Content-Type": "application/json", apikey: APP_CONFIG.supabaseKey };
+  let response;
+  try {
+    response = await fetch(APP_CONFIG.supabaseUrl + "/auth/v1/recover?redirect_to=" + encodeURIComponent(redirect), { method: "POST", headers: headers, body: JSON.stringify({ email: email }) });
+  } catch (error) { throw new Error("Cannot reach the login service. Check your internet."); }
+  if (!response.ok) {
+    let data = {}; try { data = await response.json(); } catch (e) { /* ignore */ }
+    throw new Error(friendlyAuthError(data));
+  }
+}
+
+// Used by the reset page: sets a new password with the one-time pass from the email link
+async function authSetPassword(newPassword, token) {
+  let response;
+  try {
+    response = await fetch(APP_CONFIG.supabaseUrl + "/auth/v1/user", { method: "PUT", headers: { "Content-Type": "application/json", apikey: APP_CONFIG.supabaseKey, Authorization: "Bearer " + token }, body: JSON.stringify({ password: newPassword }) });
+  } catch (error) { throw new Error("Cannot reach the login service. Check your internet."); }
+  let data = {}; try { data = await response.json(); } catch (e) { /* ignore */ }
+  if (!response.ok) throw new Error(friendlyAuthError(data));
+  return data;
+}
+
 async function authLogOut() {
   const session = getSession();
   clearSession();

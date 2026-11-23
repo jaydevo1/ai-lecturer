@@ -795,8 +795,7 @@ function askUnderstanding() {
   isPlaying = false;
   btnPlay.textContent = "\u25B6 Resume";
   statusEl.textContent = "Waiting for you";
-  subtitleEl.textContent = "Does that make sense?";
-  checkBarEl.hidden = false;
+  checkBarEl.hidden = false;                 // the question itself is only spoken; the buttons pop up at the side
   speakOneLine("Does that make sense?", function () {});
 }
 
@@ -809,7 +808,6 @@ function checkYes() {
   if (!checkOpen) return;
   closeCheck();
   stopSpeaking();
-  subtitleEl.textContent = "Great, let's continue with the lesson.";
   speakOneLine("Great, let's continue with the lesson.", function () {
     isPlaying = true;
     btnPlay.textContent = "\u275A\u275A Pause";
@@ -986,6 +984,23 @@ chips.forEach(function (chip) {
   });
 });
 
+
+/* ---------------------------------------------------------
+   LESSON SETTINGS (the gear): speed, voice, mute, repeat
+   --------------------------------------------------------- */
+const gearBtn = document.getElementById("btnGear");
+const sheetEl = document.getElementById("settingsSheet");
+function setSheet(open) {
+  if (!sheetEl) return;
+  sheetEl.hidden = !open;
+  if (gearBtn) gearBtn.setAttribute("aria-expanded", open ? "true" : "false");
+}
+if (gearBtn && sheetEl) {
+  gearBtn.addEventListener("click", function () { setSheet(sheetEl.hidden); });
+  document.getElementById("sheetClose").addEventListener("click", function () { setSheet(false); });
+  sheetEl.addEventListener("click", function (e) { if (e.target === sheetEl) setSheet(false); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") setSheet(false); });
+}
 
 /* ---------------------------------------------------------
    11. START

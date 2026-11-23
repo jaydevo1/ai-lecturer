@@ -19,7 +19,10 @@
       <p class="topbar-label" id="topbarLabel">Now teaching</p>
       <h1 class="topbar-title" id="lessonTitle">Polymorphism</h1>
       <!-- player.js shows this link only for lessons made from an uploaded document -->
-      <a class="contents-link" id="contentsLink" href="outline.html" hidden>&#9776; Contents</a>
+    </div>
+    <div class="topbar-tools">
+      <a class="contents-link" id="contentsLink" href="outline.html" hidden>Contents</a>
+      <button class="chip chip-end" type="button">End</button>
     </div>
     <div class="progress">
       <div class="progress-track">
@@ -148,6 +151,18 @@
         </div>
       </div>
 
+      <!-- 4c. After an answer: a small pop-up at the side of the picture (the lecturer asks "Does that make sense?" aloud) -->
+      <div class="check-bar" id="checkBar" role="group" aria-label="Does that make sense?" hidden>
+        <button class="check-btn check-yes" id="checkYes" type="button" aria-label="Yes, continue the lesson">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>
+          <span>Yes</span>
+        </button>
+        <button class="check-btn" id="checkNo" type="button" aria-label="Not yet, explain again">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg>
+          <span>Explain again</span>
+        </button>
+      </div>
+
       <!-- 5. CAPTIONS, like subtitles on a lesson video -->
       <p class="subtitle" id="subtitle">
         Different animals can all "make a sound", but each one does it in its own way.
@@ -162,22 +177,9 @@
       <button class="btn" id="btnPrev" type="button">&#9664; Back</button>
       <button class="btn btn-primary" id="btnPlay" type="button">&#10074;&#10074; Pause</button>
       <button class="btn" id="btnNext" type="button">Next &#9654;</button>
-      <button class="btn" id="btnRepeat" type="button">Repeat</button>
-      <button class="btn" id="btnMute" type="button">Mute</button>
-      <select class="btn" id="speedSelect" aria-label="Speaking speed">
-        <option value="0.75">0.75x</option>
-        <option value="1" selected>1x</option>
-        <option value="1.25">1.25x</option>
-        <option value="1.5">1.5x</option>
-      </select>
-      <select class="btn" id="voiceSelect" aria-label="Lecturer voice" title="Lecturer voice"><option>Voice</option></select>
-    </div>
-
-    <!-- Shown after the lecturer answers a question -->
-    <div class="check-bar" id="checkBar" hidden>
-      <span>Does that make sense?</span>
-      <button class="btn btn-primary" id="checkYes" type="button">Yes, continue</button>
-      <button class="btn" id="checkNo" type="button">Not yet, explain again</button>
+      <button class="btn btn-gear" id="btnGear" type="button" aria-label="Lesson settings" aria-expanded="false" title="Lesson settings">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
     </div>
 
     <!-- Ask the lecturer (text interaction; voice comes later) -->
@@ -195,11 +197,30 @@
     </form>
 
     <div class="quick-row">
+      <button class="chip chip-quiz" id="btnQuiz" type="button">Quiz me</button>
       <button class="chip" type="button" data-mode="simpler">Explain simpler</button>
       <button class="chip" type="button" data-mode="example">Another example</button>
       <button class="chip" type="button" data-mode="diagram">Show a diagram</button>
-      <button class="chip chip-quiz" id="btnQuiz" type="button">Quiz me</button>
-      <button class="chip chip-end" type="button">End lesson</button>
+    </div>
+
+    <!-- Lesson settings (opens from the gear): speed, voice, mute, repeat. Same buttons as before, just tucked away. -->
+    <div class="settings-sheet" id="settingsSheet" hidden>
+      <div class="sheet-card" role="dialog" aria-label="Lesson settings">
+        <div class="sheet-head"><h2>Lesson settings</h2><button class="sheet-close" id="sheetClose" type="button" aria-label="Close">&#10005;</button></div>
+        <div class="sheet-row"><span>Speaking speed</span>
+          <select class="btn" id="speedSelect" aria-label="Speaking speed">
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+          </select>
+        </div>
+        <div class="sheet-row"><span>Voice</span>
+          <select class="btn" id="voiceSelect" aria-label="Lecturer voice" title="Lecturer voice"><option>Voice</option></select>
+        </div>
+        <div class="sheet-row"><span>Sound</span><button class="btn" id="btnMute" type="button">Mute</button></div>
+        <div class="sheet-row"><span>Say this part again</span><button class="btn" id="btnRepeat" type="button">Repeat</button></div>
+      </div>
     </div>
   </footer>
 

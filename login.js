@@ -30,8 +30,20 @@ function setMode(newMode) {
   nameInput.required = mode === "signup";
   authBtn.textContent = mode === "signup" ? "Create account" : "Log in";
   passwordInput.autocomplete = mode === "signup" ? "new-password" : "current-password";
+  document.getElementById("forgotBtn").hidden = mode !== "login";
   showStatus("", false);
 }
+
+document.getElementById("forgotBtn").addEventListener("click", async function () {
+  const email = emailInput.value.trim();
+  if (!accountsReady()) { showStatus("Accounts are not set up yet.", true); return; }
+  if (!email) { showStatus("Type your email above first, then tap Forgot password.", true); return; }
+  showStatus("Sending...", false);
+  try {
+    await authRecover(email);
+    showStatus("If that email has an account, a reset link is on its way. Check your inbox (and spam).", false);
+  } catch (error) { showStatus(error.message, true); }
+});
 
 tabLogin.addEventListener("click", function () { setMode("login"); });
 tabSignup.addEventListener("click", function () { setMode("signup"); });

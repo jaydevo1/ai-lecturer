@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset password | AI Lecturer</title>
+  <link rel="stylesheet" href="generate.css">
+  <link rel="stylesheet" href="theme.css">
+  <script src="theme.js"></script>
+</head>
+<body>
+  <main class="page">
+    <h1>Choose a new password</h1>
+    <section class="card">
+      <form id="resetForm" class="form">
+        <div class="field">
+          <label for="newPass">New password</label>
+          <input id="newPass" type="password" autocomplete="new-password" required minlength="6" placeholder="At least 6 characters">
+        </div>
+        <label class="auth-show"><input type="checkbox" id="showNew"> Show password</label>
+        <button class="btn-generate" id="resetBtn" type="submit">Save new password</button>
+        <p class="status" id="resetStatus"></p>
+      </form>
+    </section>
+    <a class="guest-link" href="login.html">Back to log in</a>
+  </main>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="reset.js"></script>
+</body>
+</html>

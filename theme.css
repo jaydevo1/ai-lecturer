@@ -98,3 +98,7 @@ summary::before { color: var(--accent); }
 .topbar { background: var(--card); border-bottom: 1px solid var(--line); }
 .topbar-title { color: var(--ink); }
 .guest-link { color: var(--muted); }
+
+.shell-feedback { color: var(--muted); font-size: 0.85rem; text-decoration: none; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; }
+.shell-feedback:hover { color: var(--ink); }
+.auth-forgot { background: none; border: 0; color: var(--muted); font: inherit; font-size: 0.85rem; text-decoration: underline; cursor: pointer; padding: 0; text-align: left; }
