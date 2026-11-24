@@ -1943,7 +1943,7 @@ function friendlyError(error) {
    14. ROUTES
    --------------------------------------------------------- */
 app.get("/api/health", function (req, res) {
-  res.json({ ok: true, models: MODEL_LIST, timeoutSeconds: TIMEOUT_MS / 1000 });
+  res.json({ ok: true, models: MODEL_LIST, timeoutSeconds: TIMEOUT_MS / 1000, groq: groqKeyStatus });
 });
 
 // Model names your key can see (not a promise that they work on the free tier)
@@ -2499,6 +2499,28 @@ app.post("/api/quiz", async function (req, res) {
 });
 
 
+// Tests the Groq key once at start-up (a free "list models" call, no lesson is made) and writes the answer in the log
+let groqKeyStatus = GROQ_KEY ? "checking" : "not set";
+async function checkGroqKey() {
+  if (!GROQ_KEY) return;
+  try {
+    const response = await fetch(GROQ_URL.replace(/\/chat\/completions\/?$/, "/models"), {
+      headers: { "Authorization": "Bearer " + GROQ_KEY },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (response.ok) {
+      groqKeyStatus = "ok";
+      console.log("[groq] key check: OK (the backup is ready).");
+    } else {
+      groqKeyStatus = "rejected (HTTP " + response.status + ")";
+      console.log("[groq] key check: FAILED with HTTP " + response.status + (response.status === 401 ? " - the key on this server is wrong. Paste a fresh key in Render > Environment > GROQ_API_KEY (no quotes, no spaces)." : "."));
+    }
+  } catch (error) {
+    groqKeyStatus = "could not check";
+    console.log("[groq] key check: could not reach Groq (" + error.message + ").");
+  }
+}
+
 /* ---------------------------------------------------------
    15. START LISTENING
    --------------------------------------------------------- */
@@ -2509,4 +2531,5 @@ app.listen(PORT, HOST, function () {
   console.log(ACCESS_CODE ? "Access code is ON (daily limit " + DAILY_LIMIT + " per visitor)." : "Access code is OFF (fine on your own computer).");
   console.log("Models, in order: " + MODEL_LIST.join(" -> ") + (GROQ_KEY ? " -> " + GROQ_MODELS.map(function (m) { return "groq:" + m; }).join(" -> ") + " (last backup)" : "  (no Groq backup: add GROQ_API_KEY to use one)"));
   console.log("Time limit per try: " + TIMEOUT_MS / 1000 + "s, per request: " + TOTAL_MS / 1000 + "s");
+  checkGroqKey();
 });
