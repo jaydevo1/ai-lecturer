@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voice and Avatar Lab</title>
+<!--
+  VOICE AND AVATAR LAB  (a TEST page, it does not touch your real app)
+  What it tests:
+    1. Voice: your phone's own voice  vs  a free "neural" voice (Kokoro) that runs inside the browser.
+    2. Avatar: your 2D photos  vs  a 3D character.
+    3. Mouth: it follows the real audio (neural voice) or is a guess (phone voice, because the browser hides that audio).
+  The report box at the bottom shows how fast it ran on THIS phone. Screenshot it and send it back.
+-->
+<style>
+  :root { --bg:#0e1118; --card:#171c27; --line:#2a3142; --ink:#eef1f8; --muted:#9aa3b8; --accent:#7c83ff; --gold:#ffd98a; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--ink); font-family: system-ui, sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 14px 16px 40px; }
+  h1 { font-size: 1.15rem; margin: 6px 0 2px; }
+  .sub { color: var(--muted); font-size: .85rem; margin: 0 0 12px; }
+  .stage { position: relative; height: 58vh; min-height: 360px; max-height: 560px; border-radius: 16px; overflow: hidden; border: 1px solid var(--line);
+           background: radial-gradient(ellipse at 50% 15%, #2a3350, #0e1118 70%); }
+  .board { position: absolute; left: 4%; right: 4%; top: 3%; padding: 10px 14px; border-radius: 12px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.25); z-index: 3; }
+  .board h3 { margin: 0 0 4px; font-size: .9rem; color: var(--gold); }
+  .board p { margin: 0; font-size: .8rem; line-height: 1.45; }
+  #photoBox { position: absolute; left: 0; right: 0; top: 26%; bottom: 0; display: none; align-items: flex-end; justify-content: center; }
+  #photoBox img { height: 100%; max-width: 100%; object-fit: contain; object-position: bottom; }
+  #av3d { position: absolute; left: 0; right: 0; top: 22%; bottom: 0; display: none; }
+  .cap { position: absolute; left: 4%; right: 4%; bottom: 3%; padding: 8px 12px; border-radius: 10px; background: rgba(0,0,0,.55); font-size: .8rem; z-index: 3; min-height: 2.2em; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
+  .lbl { font-size: .78rem; color: var(--muted); width: 100%; margin-bottom: -4px; }
+  button, select { font: inherit; font-size: .9rem; padding: 9px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  button.on { border-color: var(--accent); background: #232a55; }
+  button.go { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  textarea { width: 100%; min-height: 84px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; font-size: .9rem; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: .78rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; margin: 6px 0; }
+  .note { color: var(--muted); font-size: .78rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Voice and Avatar Lab</h1>
+  <p class="sub">A test page. Try each combination on your phone, then screenshot the report at the bottom.</p>
+
+  <div class="stage" id="stage">
+    <div class="board"><h3>The Process</h3><p>A process is a program in execution. It has its own address space, a program counter, registers and a stack.</p></div>
+    <div id="photoBox"><img id="photo" alt="Lecturer" src="../images/lecturer-closed.webp"></div>
+    <div id="av3d"></div>
+    <div class="cap" id="cap">Pick an avatar and a voice, then press Speak.</div>
+  </div>
+
+  <div class="row"><span class="lbl">1. Avatar</span>
+    <button id="btn2d" class="on">2D photo</button>
+    <button id="btn3d">3D character</button>
+  </div>
+
+  <div class="row"><span class="lbl">2. Voice</span>
+    <button id="btnPhone" class="on">Phone voice</button>
+    <button id="btnNeural">Neural voice (free, downloads about 85 MB once)</button>
+    <select id="voiceSel" hidden>
+      <option value="am_michael">Male (American, calm)</option>
+      <option value="am_adam">Male (American, deeper)</option>
+      <option value="bm_george">Male (British)</option>
+      <option value="af_heart">Female (American)</option>
+    </select>
+  </div>
+  <p class="note" id="engineNote">Phone voice is what the app uses now. The mouth cannot follow it exactly, so it is a guess.</p>
+
+  <textarea id="text">A process is simply a program that is running. It has its own memory, its own registers, and a program counter that tells the computer which instruction comes next. Let us look at the states a process can be in.</textarea>
+  <div class="row">
+    <button id="btnSpeak" class="go">Speak</button>
+    <button id="btnStop">Stop</button>
+    <button id="btnSample">Test the mouth with a sample sound</button>
+  </div>
+
+  <div class="lbl" style="margin-top:10px">Report (screenshot this and send it back)</div>
+  <pre id="report">Not run yet.</pre>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three/build/three.module.js",
+  "three/addons/": "./vendor/three/examples/jsm/",
+  "talkinghead": "./vendor/th/modules/talkinghead.mjs"
+} }
+</script>
+
+<script type="module">
+/* ============ small helpers ============ */
+const $ = function (id) { return document.getElementById(id); };
+const capEl = $("cap");
+const reportLines = [];
+function report(line) { reportLines.push(line); $("report").textContent = reportLines.join("\n"); }
+function resetReport() {
+  reportLines.length = 0;
+  const gpu = ("gpu" in navigator) ? "yes" : "no";
+  report("Browser: " + navigator.userAgent.slice(0, 110));
+  report("WebGPU: " + gpu + "   Memory: " + (navigator.deviceMemory || "unknown") + " GB   CPU cores: " + (navigator.hardwareConcurrency || "unknown"));
+}
+resetReport();
+
+/* ============ the mouth level (0 to 1), fed by whatever is speaking ============ */
+let mouthLevel = 0;          // smoothed
+let mouthTarget = 0;         // raw
+let analyser = null, analyserData = null;
+let guessing = false;        // true for the phone voice (no real audio to read)
+let speaking = false;
+
+function readAudioLevel() {
+  if (!analyser) return 0;
+  analyser.getByteTimeDomainData(analyserData);
+  let sum = 0;
+  for (let i = 0; i < analyserData.length; i++) { const v = (analyserData[i] - 128) / 128; sum += v * v; }
+  const rms = Math.sqrt(sum / analyserData.length);
+  return Math.min(1, rms * 5);         // scale so normal speech reaches about 0.5 to 1
+}
+
+/* ============ 2D photo avatar: closed / half / wide / blink, chosen by the audio level ============ */
+const photo = $("photo");
+const PHOTOS = { closed: "../images/lecturer-closed.webp", half: "../images/lecturer-half.webp", wide: "../images/lecturer-wide.webp", blink: "../images/lecturer-blink.webp" };
+Object.values(PHOTOS).forEach(function (src) { const i = new Image(); i.src = src; });   // preload so there is no flicker
+let photoState = "closed", blinkUntil = 0, nextBlink = performance.now() + 3000;
+
+function paint2d(now) {
+  let want = "closed";
+  if (mouthLevel > 0.42) want = "wide"; else if (mouthLevel > 0.14) want = "half";
+  if (want === "closed") {
+    if (now > nextBlink) { blinkUntil = now + 140; nextBlink = now + 2500 + Math.random() * 3500; }
+    if (now < blinkUntil) want = "blink";
+  }
+  if (want !== photoState) { photoState = want; photo.src = PHOTOS[want]; }
+}
+
+/* ============ 3D avatar: TalkingHead, loaded only when you pick it ============ */
+let head = null, head3dState = "none";
+async function ensure3d() {
+  if (head3dState === "ready") return true;
+  if (head3dState === "loading") return false;
+  head3dState = "loading";
+  capEl.textContent = "Loading the 3D character (about 5 MB)...";
+  const t0 = performance.now();
+  try {
+    const mod = await import("talkinghead");
+    head = new mod.TalkingHead($("av3d"), { ttsEndpoint: "unused", lipsyncModules: ["en"], cameraView: "upper", cameraRotateEnable: false, cameraZoomEnable: false, cameraPanEnable: false, modelFPS: 30 });
+    await head.showAvatar({ url: "./avatars/brunette.glb", body: "F", avatarMood: "neutral", lipsyncLang: "en" });
+    head.setView("upper", { cameraDistance: 0.35, cameraY: 0.0 });
+    head3dState = "ready";
+    report("3D character loaded in " + ((performance.now() - t0) / 1000).toFixed(1) + " s");
+    capEl.textContent = "3D character ready.";
+    return true;
+  } catch (error) {
+    head3dState = "error";
+    report("3D character FAILED: " + error.message);
+    capEl.textContent = "The 3D character could not load on this device.";
+    return false;
+  }
+}
+function paint3d() {
+  if (head3dState !== "ready" || !head) return;
+  // The jaw follows the level; the lips round a little on loud sounds
+  head.setFixedValue("jawOpen", mouthLevel * 0.75);
+  head.setFixedValue("mouthFunnel", Math.max(0, mouthLevel - 0.5) * 0.5);
+  head.setFixedValue("mouthSmile", (1 - mouthLevel) * 0.08);
+}
+
+/* ============ one animation loop for both avatars ============ */
+let avatarMode = "2d";
+function loop(now) {
+  if (guessing && speaking) mouthTarget = Math.random() < 0.35 ? 0.1 + Math.random() * 0.8 : mouthTarget * 0.7;
+  else if (analyser && speaking) mouthTarget = readAudioLevel();
+  else mouthTarget = 0;
+  mouthLevel += (mouthTarget - mouthLevel) * 0.45;    // smoothing, so the mouth does not jitter
+  if (avatarMode === "2d") paint2d(now); else paint3d();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+async function setAvatar(mode) {
+  avatarMode = mode;
+  $("btn2d").classList.toggle("on", mode === "2d");
+  $("btn3d").classList.toggle("on", mode === "3d");
+  $("photoBox").style.display = mode === "2d" ? "flex" : "none";
+  $("av3d").style.display = mode === "3d" ? "block" : "none";
+  if (mode === "3d") await ensure3d();
+}
+$("btn2d").addEventListener("click", function () { setAvatar("2d"); });
+$("btn3d").addEventListener("click", function () { setAvatar("3d"); });
+setAvatar("2d");
+
+/* ============ audio playback with a level meter ============ */
+let ctx = null, currentSource = null, stopFlag = false;
+function audioContext() {
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    analyserData = new Uint8Array(analyser.fftSize);
+    analyser.connect(ctx.destination);
+  }
+  if (ctx.state === "suspended") ctx.resume();
+  return ctx;
+}
+function playSamples(samples, rate) {
+  return new Promise(function (resolve) {
+    const c = audioContext();
+    const buffer = c.createBuffer(1, samples.length, rate);
+    buffer.copyToChannel(samples, 0);
+    const src = c.createBufferSource();
+    src.buffer = buffer;
+    src.connect(analyser);
+    currentSource = src;
+    src.onended = function () { currentSource = null; resolve(); };
+    src.start();
+  });
+}
+
+/* ============ voice engine 1: the phone's own voice ============ */
+let engine = "phone";
+function speakPhone(text) {
+  return new Promise(function (resolve) {
+    guessing = true; speaking = true;
+    const u = new SpeechSynthesisUtterance(text);
+    u.onend = u.onerror = function () { speaking = false; guessing = false; resolve(); };
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+  });
+}
+
+/* ============ voice engine 2: Kokoro, a free neural voice that runs in the browser ============ */
+let tts = null, ttsLoading = false;
+async function loadNeural() {
+  if (tts) return true;
+  if (ttsLoading) return false;
+  ttsLoading = true;
+  const btn = $("btnNeural");
+  const t0 = performance.now();
+  try {
+    capEl.textContent = "Downloading the neural voice... (only the first time)";
+    const mod = await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm");
+    const hasGpu = "gpu" in navigator;
+    const device = hasGpu ? "webgpu" : "wasm";
+    tts = await mod.KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
+      dtype: "q8",
+      device: device,
+      progress_callback: function (p) {
+        if (p && p.status === "progress" && p.total) btn.textContent = "Downloading... " + Math.round(p.loaded / p.total * 100) + "%";
+      }
+    });
+    btn.textContent = "Neural voice (ready)";
+    report("Neural voice loaded in " + ((performance.now() - t0) / 1000).toFixed(1) + " s using " + device);
+    capEl.textContent = "Neural voice ready.";
+    return true;
+  } catch (error) {
+    tts = null;
+    btn.textContent = "Neural voice (failed, tap to retry)";
+    report("Neural voice FAILED: " + error.message);
+    capEl.textContent = "The neural voice could not load on this device.";
+    return false;
+  } finally { ttsLoading = false; }
+}
+
+function splitSentences(text) {
+  return (text.match(/[^.!?]+[.!?]*/g) || [text]).map(function (s) { return s.trim(); }).filter(Boolean);
+}
+
+async function speakNeural(text) {
+  if (!(await loadNeural())) return;
+  const voice = $("voiceSel").value;
+  const sentences = splitSentences(text);
+  const tStart = performance.now();
+  let firstAudioAt = null, totalAudio = 0, totalGen = 0;
+  speaking = true; guessing = false;
+  // make the next sentence while the current one plays
+  let pending = null;
+  function make(i) {
+    if (i >= sentences.length) return null;
+    const g0 = performance.now();
+    return tts.generate(sentences[i], { voice: voice }).then(function (a) { totalGen += (performance.now() - g0) / 1000; return a; });
+  }
+  pending = make(0);
+  for (let i = 0; i < sentences.length && !stopFlag; i++) {
+    const audio = await pending;
+    pending = make(i + 1);
+    if (firstAudioAt === null) firstAudioAt = (performance.now() - tStart) / 1000;
+    capEl.textContent = sentences[i];
+    totalAudio += audio.audio.length / audio.sampling_rate;
+    await playSamples(audio.audio, audio.sampling_rate);
+  }
+  speaking = false;
+  report("Time to first sound: " + (firstAudioAt || 0).toFixed(1) + " s");
+  report("Voice made " + totalAudio.toFixed(1) + " s of speech in " + totalGen.toFixed(1) + " s  (speed " + (totalAudio / Math.max(totalGen, 0.01)).toFixed(2) + "x real time; above 1 is good)");
+}
+
+/* ============ a sample sound, to test the mouth without any voice ============ */
+async function playSample() {
+  const rate = 24000, secs = 5, n = rate * secs, data = new Float32Array(n);
+  let phase = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / rate;
+    const syllable = Math.max(0, Math.sin(t * 2 * Math.PI * 3.2)) ** 1.5;      // about 3 "syllables" a second
+    const loud = 0.25 + 0.75 * Math.abs(Math.sin(t * 1.3));                       // loud and soft parts
+    phase += 2 * Math.PI * (140 + 60 * Math.sin(t * 5)) / rate;
+    data[i] = Math.sin(phase) * syllable * loud * 0.5;
+  }
+  speaking = true; guessing = false;
+  capEl.textContent = "Sample sound (not a voice): watch the mouth follow the loud and soft parts.";
+  await playSamples(data, rate);
+  speaking = false;
+}
+
+/* ============ buttons ============ */
+function setEngine(e) {
+  engine = e;
+  $("btnPhone").classList.toggle("on", e === "phone");
+  $("btnNeural").classList.toggle("on", e === "neural");
+  $("voiceSel").hidden = e !== "neural";
+  $("engineNote").textContent = e === "phone"
+    ? "Phone voice is what the app uses now. The mouth cannot follow it exactly, so it is a guess."
+    : "Neural voice makes real audio inside the browser, so the mouth follows the actual sound.";
+}
+$("btnPhone").addEventListener("click", function () { setEngine("phone"); });
+$("btnNeural").addEventListener("click", async function () { setEngine("neural"); await loadNeural(); });
+
+$("btnSpeak").addEventListener("click", async function () {
+  stopFlag = false;
+  audioContext();
+  const text = $("text").value.trim();
+  if (!text) return;
+  if (avatarMode === "3d" && head3dState !== "ready") await setAvatar("3d");
+  if (engine === "phone") { capEl.textContent = text; await speakPhone(text); }
+  else await speakNeural(text);
+});
+$("btnStop").addEventListener("click", function () {
+  stopFlag = true; speaking = false; guessing = false;
+  try { speechSynthesis.cancel(); } catch (e) { /* fine */ }
+  if (currentSource) { try { currentSource.stop(); } catch (e) { /* fine */ } }
+});
+$("btnSample").addEventListener("click", function () { stopFlag = false; audioContext(); playSample(); });
+
+window.__lab = { get mouth() { return mouthLevel; }, get photo() { return photoState; }, get head() { return head3dState; } };
+</script>
+</body>
+</html>
