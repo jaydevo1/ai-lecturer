@@ -113,6 +113,7 @@ resetReport();
 let mouthLevel = 0;          // smoothed
 let mouthTarget = 0;         // raw
 let analyser = null, analyserData = null;
+let nextSyllable = 0, syllableCount = 0;
 let guessing = false;        // true for the phone voice (no real audio to read)
 let speaking = false;
 
@@ -130,7 +131,7 @@ const photo = $("photo");
 const SP = "../images/sprites/";
 const PHOTOS = { closed: SP+"closed.webp", eh: SP+"eh.webp", ah: SP+"ah.webp", oo: SP+"oo.webp", ee: SP+"ee.webp", fv: SP+"fv.webp", blink: SP+"blink.webp" };
 Object.values(PHOTOS).forEach(function (src) { const i = new Image(); i.src = src; });   // preload so there is no flicker
-let photoState = "closed", blinkUntil = 0, nextBlink = performance.now() + 3000, midPick = 0, wasOpen = false;
+let photoState = "closed", blinkUntil = 0, nextBlink = performance.now() + 3000, midPick = 0, wasOpen = false, lastSwap = 0;
 const MID = ["ee", "oo", "eh", "ee", "fv", "oo"];   // the mid mouth shapes take turns, so it does not look like one stuck shape
 
 function paint2d(now) {
@@ -143,7 +144,7 @@ function paint2d(now) {
     if (now > nextBlink) { blinkUntil = now + 140; nextBlink = now + 2500 + Math.random() * 3500; }
     if (now < blinkUntil) want = "blink";
   }
-  if (want !== photoState) { photoState = want; photo.src = PHOTOS[want]; }
+  if (want !== photoState && (want === "closed" || now - lastSwap > 110)) { photoState = want; photo.src = PHOTOS[want]; lastSwap = now; }
 }
 
 /* ============ 3D avatar: TalkingHead, loaded only when you pick it ============ */
@@ -181,10 +182,17 @@ function paint3d() {
 /* ============ one animation loop for both avatars ============ */
 let avatarMode = "2d";
 function loop(now) {
-  if (guessing && speaking) mouthTarget = Math.random() < 0.35 ? 0.1 + Math.random() * 0.8 : mouthTarget * 0.7;
+  if (guessing && speaking) {
+    // Talking rhythm: a new mouth size about every 140 to 220 ms (like syllables), with a short rest every few syllables
+    if (now > nextSyllable) {
+      syllableCount++;
+      if (syllableCount % (4 + Math.floor(Math.random() * 4)) === 0) { mouthTarget = 0.05; nextSyllable = now + 200 + Math.random() * 150; }
+      else { mouthTarget = 0.25 + Math.random() * 0.6; nextSyllable = now + 140 + Math.random() * 80; }
+    }
+  }
   else if (analyser && speaking) mouthTarget = readAudioLevel();
   else mouthTarget = 0;
-  mouthLevel += (mouthTarget - mouthLevel) * 0.45;    // smoothing, so the mouth does not jitter
+  mouthLevel += (mouthTarget - mouthLevel) * (guessing ? 0.25 : 0.45);    // smoothing, so the mouth does not jitter
   if (avatarMode === "2d") paint2d(now); else paint3d();
   requestAnimationFrame(loop);
 }
