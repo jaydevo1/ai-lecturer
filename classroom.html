@@ -147,7 +147,7 @@
       <div class="lecturer-tile" role="img" aria-label="Virtual lecturer">
         <span class="tile-glow"></span>
         <div class="tile-photo">
-          <img id="faceImg" src="images/lecturer-closed.webp" alt="" width="440" height="440">
+          <img id="faceImg" src="images/sprites/closed.webp" alt="" width="640" height="640">
         </div>
       </div>
 
@@ -172,7 +172,13 @@
   </main>
 
   <!-- ===== CONTROLS ===== -->
-  <footer class="controls">
+  <footer class="controls" id="controls">
+    <!-- Small tab: hides the controls so the classroom gets more room (on a computer they also slide up when the mouse goes near the bottom) -->
+    <div class="ctrl-toggle-row">
+      <button class="ctrl-toggle" id="ctrlToggle" type="button" aria-label="Hide controls" aria-expanded="true" title="Hide or show controls">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </div>
     <div class="control-row">
       <button class="btn" id="btnPrev" type="button">&#9664; Back</button>
       <button class="btn btn-primary" id="btnPlay" type="button">&#10074;&#10074; Pause</button>
@@ -215,7 +221,13 @@
             <option value="1.5">1.5x</option>
           </select>
         </div>
-        <div class="sheet-row"><span>Voice</span>
+        <div class="sheet-row" id="voiceModeRow" hidden><span>Voice type</span>
+          <select class="btn" id="voiceMode" aria-label="Voice type">
+            <option value="phone">Phone voice</option>
+            <option value="natural">Natural voice (beta)</option>
+          </select>
+        </div>
+        <div class="sheet-row"><span>Phone voice</span>
           <select class="btn" id="voiceSelect" aria-label="Lecturer voice" title="Lecturer voice"><option>Voice</option></select>
         </div>
         <div class="sheet-row"><span>Sound</span><button class="btn" id="btnMute" type="button">Mute</button></div>

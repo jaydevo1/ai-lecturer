@@ -38,20 +38,22 @@ const speakingDotEl   = document.getElementById("speakingDot");
 const mouthEl         = document.getElementById("mouth");
 
 // ----- Lecturer portrait (photo tile) -----
-// Four photos of the same person. While he speaks we swap between them quickly,
-// and every few seconds we show the "eyes closed" photo for a moment (a blink).
+// One base photo plus six small variations (mouth shapes and a blink), all made from the SAME picture,
+// so the face never shifts. The mouth shape follows the loudness of the voice.
 const faceImgEl = document.getElementById("faceImg");
 const stageEl   = document.querySelector(".stage");
 const FACES = {
-  closed: "images/lecturer-closed.webp",
-  half:   "images/lecturer-half.webp",
-  wide:   "images/lecturer-wide.webp",
-  blink:  "images/lecturer-blink.webp"
+  closed: "images/sprites/closed.webp",
+  eh:     "images/sprites/eh.webp",
+  ah:     "images/sprites/ah.webp",
+  oo:     "images/sprites/oo.webp",
+  ee:     "images/sprites/ee.webp",
+  fv:     "images/sprites/fv.webp",
+  blink:  "images/sprites/blink.webp"
 };
 let currentFace = "closed";
-let blinking = false;
 
-// Load all four photos now so swapping later is instant (no flicker)
+// Load all the pictures now so swapping later is instant (no flicker)
 Object.keys(FACES).forEach(function (name) { new Image().src = FACES[name]; });
 
 // If the photo cannot load, show the drawn teacher instead
@@ -62,25 +64,58 @@ if (faceImgEl) {
 }
 
 function setFace(name) {
+  if (name === currentFace) return;
   currentFace = name;
-  if (faceImgEl && !blinking) faceImgEl.src = FACES[name];
+  if (faceImgEl) faceImgEl.src = FACES[name];
 }
 
-// Blink at random moments, 2.5 to 5.5 seconds apart
-function scheduleBlink() {
-  setTimeout(function () {
-    if (faceImgEl) {
-      blinking = true;
-      faceImgEl.src = FACES.blink;
-      setTimeout(function () {
-        blinking = false;
-        faceImgEl.src = FACES[currentFace];
-      }, 150);
-    }
-    scheduleBlink();
-  }, 2500 + Math.random() * 3000);
+// What drives the mouth:
+//  - natural voice: the real loudness of the sound (measured with an "analyser")
+//  - phone voice: the browser gives no sound to measure, so we make a talking rhythm up
+let speakingNow = false;       // true while the lecturer is speaking
+let usingCloudAudio = false;   // true while a natural-voice clip is playing
+let analyserNode = null, analyserData = null, clipGain = 5;
+let mouthLevel = 0, mouthTarget = 0, nextSyllable = 0, syllableCount = 0;
+let midPick = 0, wasOpen = false, lastSwap = 0, blinkUntil = 0, nextBlink = 3000;
+const MID_SHAPES = ["ee", "oo", "eh", "ee", "fv", "oo"];   // the middle mouth shapes take turns
+
+function measureLevel() {
+  analyserNode.getByteTimeDomainData(analyserData);
+  let sum = 0;
+  for (let i = 0; i < analyserData.length; i++) { const v = (analyserData[i] - 128) / 128; sum += v * v; }
+  return Math.min(1, Math.sqrt(sum / analyserData.length) * clipGain);
 }
-scheduleBlink();
+
+function faceLoop(now) {
+  if (speakingNow && usingCloudAudio && analyserNode) {
+    mouthTarget = measureLevel();
+  } else if (speakingNow) {
+    if (now > nextSyllable) {                       // a new mouth size about every 140 to 220 ms, like syllables
+      syllableCount++;
+      if (syllableCount % (4 + Math.floor(Math.random() * 4)) === 0) { mouthTarget = 0.05; nextSyllable = now + 200 + Math.random() * 150; }
+      else { mouthTarget = 0.25 + Math.random() * 0.6; nextSyllable = now + 140 + Math.random() * 80; }
+    }
+  } else {
+    mouthTarget = 0;
+  }
+  mouthLevel += (mouthTarget - mouthLevel) * (usingCloudAudio ? 0.45 : 0.25);
+
+  const open = mouthLevel > 0.14;
+  if (open && !wasOpen) midPick = (midPick + 1) % MID_SHAPES.length;
+  wasOpen = open;
+  let want = "closed";
+  if (mouthLevel > 0.5) want = "ah";
+  else if (mouthLevel > 0.3) want = MID_SHAPES[midPick];
+  else if (open) want = "eh";
+  if (want === "closed") {                          // blink only while the mouth is closed
+    if (now > nextBlink) { blinkUntil = now + 140; nextBlink = now + 2500 + Math.random() * 3500; }
+    if (now < blinkUntil) want = "blink";
+  }
+  if (want !== currentFace && (want === "closed" || want === "blink" || now - lastSwap > 110)) { setFace(want); lastSwap = now; }
+  if (mouthEl) mouthEl.setAttribute("ry", (3 + mouthLevel * 9).toFixed(1));   // the drawn teacher (backup picture)
+  requestAnimationFrame(faceLoop);
+}
+requestAnimationFrame(faceLoop);
 
 const btnPlay     = document.getElementById("btnPlay");
 const btnPrev     = document.getElementById("btnPrev");
@@ -111,7 +146,6 @@ let partIndex = 0;        // which sentence we are on
 // Events from an OLD voice run carry an old number, so we can ignore them.
 let speakToken = 0;
 
-let mouthTimer = null;
 let startTimer = null;        // waits 150 ms after a cancel
 let startCheckTimer = null;   // watchdog 1: did the voice START?
 let watchdogTimer = null;     // watchdog 2: did the voice FINISH?
@@ -410,6 +444,161 @@ function splitIntoParts(segment) {
   return pieces.map(function (p) { return p.trim(); }).filter(Boolean);
 }
 
+/* ---------------------------------------------------------
+   NATURAL VOICE (made once on the server, saved, and played here as a small sound file)
+   - The server says whether it is switched on (/api/health). If it is, the settings sheet gets a "Voice type" choice.
+   - We ask for a few sentences at a time and fetch the NEXT piece while this one plays, so there are no gaps.
+   - If anything goes wrong (daily limit, no internet), we quietly use the phone voice for a while.
+   --------------------------------------------------------- */
+const CLOUD = { available: false };
+let cloudDownUntil = 0;            // after a failure we use the phone voice until this time
+let audioCtx = null, gainNode = null, currentSource = null;
+const clipCache = new Map();       // text -> promise of the decoded sound
+
+function wantsNatural() {
+  try { return localStorage.getItem("voiceMode") === "natural"; } catch (e) { return false; }
+}
+function cloudActive() {
+  return CLOUD.available && wantsNatural() && Date.now() > cloudDownUntil;
+}
+
+// Sound must be unlocked by a tap. playCurrent() calls this inside the Start/Resume tap.
+function ensureAudio() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    audioCtx = new AC();
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 1024;
+    analyserData = new Uint8Array(analyserNode.fftSize);
+    gainNode = audioCtx.createGain();
+    analyserNode.connect(gainNode);     // the analyser sits BEFORE the volume, so Mute still moves the mouth
+    gainNode.connect(audioCtx.destination);
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return true;
+}
+
+function stopClip() {
+  usingCloudAudio = false;
+  if (currentSource) {
+    const old = currentSource;
+    currentSource = null;
+    old.onended = null;
+    try { old.stop(); } catch (e) { /* already stopped */ }
+  }
+}
+
+// Downloads one clip and turns it into sound. Remembered, so repeating is instant.
+function getClip(text) {
+  if (clipCache.has(text)) return clipCache.get(text);
+  const job = (async function () {
+    let response;
+    const timeout = new Promise(function (_, reject) { setTimeout(function () { reject(new Error("voice took too long")); }, 75000); });
+    response = await Promise.race([
+      apiFetch("/api/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: text }) }),
+      timeout
+    ]);
+    if (!response.ok) throw new Error("voice HTTP " + response.status);
+    const bytes = await response.arrayBuffer();
+    ensureAudio();
+    const buffer = await audioCtx.decodeAudioData(bytes);
+    // Auto-volume for the mouth: deep or quiet voices would barely open it, so measure this clip and scale to suit
+    const data = buffer.getChannelData(0), win = Math.floor(buffer.sampleRate * 0.05), loud = [];
+    for (let a = 0; a + win < data.length; a += win) { let q = 0; for (let k = a; k < a + win; k++) q += data[k] * data[k]; loud.push(Math.sqrt(q / win)); }
+    loud.sort(function (x, y) { return x - y; });
+    const p90 = loud[Math.floor(loud.length * 0.9)] || 0.1;
+    buffer.mouthGain = Math.max(2, Math.min(30, 0.6 / p90));
+    return buffer;
+  })();
+  clipCache.set(text, job);
+  job.catch(function () { clipCache.delete(text); });
+  if (clipCache.size > 14) clipCache.delete(clipCache.keys().next().value);   // keep memory small
+  return job;
+}
+
+// A "chunk" = a few sentences (about 260 letters) spoken as one clip, starting at sentence number "from".
+function chunkAt(segmentParts, from) {
+  let n = 0, text = "";
+  while (from + n < segmentParts.length) {
+    const piece = segmentParts[from + n];
+    if (n > 0 && (text + " " + piece).length > 260) break;
+    text += (n ? " " : "") + piece;
+    n++;
+  }
+  return n ? { text: text, n: n } : null;
+}
+
+// While one clip plays, fetch the next one (in this segment, or the start of the next segment)
+function prefetchAfter(nextFrom) {
+  let next = chunkAt(parts, nextFrom);
+  if (!next && lesson && lesson.segments[current + 1] && !lesson.segments[current].checkAfter && !lesson.segments[current].endsLesson) {
+    next = chunkAt(splitIntoParts(lesson.segments[current + 1]), 0);
+  }
+  if (next && next.text.length <= 690) getClip(next.text).catch(function () { /* handled when it is needed */ });
+}
+
+function speakChunkCloud(token) {
+  const chunk = chunkAt(parts, partIndex);
+  if (!chunk || chunk.text.length > 690) { speakPartPhone(token, false); return; }
+
+  if (!speakingNow) statusEl.textContent = "Preparing the voice...";
+  getClip(chunk.text).then(function (buffer) {
+    if (token !== speakToken) return;
+    ensureAudio();
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.value = speechSpeed;
+    source.connect(analyserNode);
+    gainNode.gain.value = isMuted ? 0 : 1;      // muted still "speaks" silently, so timing stays the same
+    clipGain = buffer.mouthGain || 5;
+    currentSource = source;
+    usingCloudAudio = true;
+    setSpeaking(true);
+    source.onended = function () {
+      if (currentSource === source) currentSource = null;
+      if (token !== speakToken) return;
+      partIndex += chunk.n;
+      if (partIndex < parts.length) {
+        speakPart(token, false);
+      } else {
+        setSpeaking(false);
+        segmentSpoken();
+      }
+    };
+    source.start();
+    prefetchAfter(partIndex + chunk.n);
+  }).catch(function (error) {
+    if (token !== speakToken) return;
+    console.warn("Natural voice failed, using the phone voice for a while:", error && error.message);
+    cloudDownUntil = Date.now() + 5 * 60 * 1000;
+    statusEl.textContent = "Using the phone voice for now";
+    speakPartPhone(token, false);
+  });
+}
+
+// Ask the server if the natural voice is switched on; if so, show the choice in the settings
+(async function checkNaturalVoice() {
+  try {
+    const response = await apiFetch("/api/health");
+    const info = await response.json();
+    if (!info.voice || !info.voice.on) return;
+    CLOUD.available = true;
+    const row = document.getElementById("voiceModeRow");
+    const select = document.getElementById("voiceMode");
+    if (row && select) {
+      row.hidden = false;
+      select.value = wantsNatural() ? "natural" : "phone";
+      select.addEventListener("change", function () {
+        try { localStorage.setItem("voiceMode", select.value); } catch (e) { /* fine */ }
+        cloudDownUntil = 0;
+        if (isPlaying && lesson) { stopSpeaking(); showSegment(current, true); }   // hear the new voice straight away
+      });
+    }
+  } catch (e) { /* server asleep or old version: the phone voice just stays */ }
+})();
+
+
 // Stops everything: voice, timers, and any pending start.
 function stopSpeaking() {
   speakToken++;                         // makes all old voice events "stale"
@@ -417,43 +606,35 @@ function stopSpeaking() {
   clearTimeout(startCheckTimer);
   clearTimeout(watchdogTimer);
   if (speechSupported) window.speechSynthesis.cancel();
+  stopClip();
   setSpeaking(false);
 }
 
-// Green dot, status text and the moving mouth
+// Green dot and status text. (The mouth itself is moved by faceLoop above.)
 function setSpeaking(isSpeaking) {
   speakingDotEl.classList.toggle("is-speaking", isSpeaking);
-
+  speakingNow = isSpeaking;
   if (isSpeaking) {
     statusEl.textContent = "Speaking...";
-    clearInterval(mouthTimer);
-    // The mouth opens by a random amount each time, which looks more like real speech than a flap
-    mouthTimer = setInterval(function () {
-      const opening = 3 + Math.random() * 9;       // between 3 (closed) and 12 (wide)
-      mouthEl.setAttribute("ry", opening.toFixed(1));
-      // Same random amount drives the photo: mostly closed/half open, sometimes wide
-      setFace(opening < 6 ? "closed" : opening < 10.5 ? "half" : "wide");
-    }, 120);
   } else {
-    clearInterval(mouthTimer);
-    mouthEl.setAttribute("ry", "3");
-    setFace("closed");
+    usingCloudAudio = false;
     statusEl.textContent = isPlaying ? "Teaching" : "Paused";
   }
 }
 
 // Start (or restart) speaking the current segment from a given sentence.
 function playCurrent(fromPart) {
-  if (!speechSupported) {
+  if (!speechSupported && !cloudActive()) {
     statusEl.textContent = "This browser cannot speak. Use Chrome or Edge.";
     return;
   }
+  if (CLOUD.available) ensureAudio();      // must happen inside the tap, or phones keep the sound locked
 
   parts = splitIntoParts(lesson.segments[current]);
   partIndex = Math.min(Math.max(fromPart || 0, 0), parts.length - 1);
 
   const synth = window.speechSynthesis;
-  const wasBusy = synth.speaking || synth.pending;
+  const wasBusy = speechSupported && (synth.speaking || synth.pending);
 
   stopSpeaking();
   const myToken = speakToken;           // the number of THIS run
@@ -466,8 +647,25 @@ function playCurrent(fromPart) {
   }, wasBusy ? 150 : 0);
 }
 
-// Speaks ONE sentence (parts[partIndex]); when it ends, speaks the next one.
+// Speaks the next piece: with the natural voice if it is on and working, otherwise the phone voice.
 function speakPart(token, isRetry) {
+  if (cloudActive()) speakChunkCloud(token);
+  else speakPartPhone(token, isRetry);
+}
+
+// The whole segment has been spoken: go on to the quiz question, the next segment, or the end.
+function segmentSpoken() {
+  if (lesson.segments[current].endsLesson) {
+    finishLesson();                       // a quiz re-teach segment ends the lesson when it is done
+  } else if (lesson.segments[current].checkAfter) {
+    askUnderstanding();                   // "Does that make sense?"
+  } else {
+    goTo(current + 1);                    // otherwise the next segment
+  }
+}
+
+// Speaks ONE sentence (parts[partIndex]) with the phone's own voice; when it ends, speaks the next one.
+function speakPartPhone(token, isRetry) {
   const synth = window.speechSynthesis;
   const text = parts[partIndex];
 
@@ -499,14 +697,7 @@ function speakPart(token, isRetry) {
         speakPart(token, false);          // next sentence
       } else {
         setSpeaking(false);
-        // A quiz re-teach segment ends the lesson when it is done; otherwise go to the next segment
-        if (lesson.segments[current].endsLesson) {
-          finishLesson();
-        } else if (lesson.segments[current].checkAfter) {
-          askUnderstanding();             // "Does that make sense?"
-        } else {
-          goTo(current + 1);              // whole segment spoken: next segment
-        }
+        segmentSpoken();
       }
     }
 
@@ -1022,3 +1213,59 @@ if (gearBtn && sheetEl) {
    11. START
    --------------------------------------------------------- */
 loadLesson();
+
+
+
+/* ---------------------------------------------------------
+   HIDE / SHOW THE CONTROLS
+   - The small arrow tab hides the controls so the classroom gets more room (remembered on this device).
+   - On a computer the controls start hidden and slide up when the mouse goes near the bottom of the window.
+   - On a phone they start visible; tap the tab to hide them, tap again to bring them back.
+   --------------------------------------------------------- */
+(function setupHideControls() {
+  const controlsEl = document.getElementById("controls");
+  const toggleEl = document.getElementById("ctrlToggle");
+  const topbarEl = document.querySelector(".topbar");
+  if (!controlsEl || !toggleEl) return;
+
+  // The picture needs to know how tall the top bar is
+  function measureTopbar() {
+    if (topbarEl) document.documentElement.style.setProperty("--topbar-h", topbarEl.offsetHeight + "px");
+  }
+  measureTopbar();
+  window.addEventListener("resize", measureTopbar);
+
+  const bigScreen = window.matchMedia("(min-width: 800px) and (hover: hover)").matches;
+  let saved = null;
+  try { saved = localStorage.getItem("controlsHidden"); } catch (e) { /* fine */ }
+  let hidden = saved === null ? bigScreen : saved === "1";
+
+  function apply() {
+    document.body.classList.toggle("controls-hidden", hidden);
+    toggleEl.setAttribute("aria-expanded", hidden ? "false" : "true");
+    toggleEl.setAttribute("aria-label", hidden ? "Show controls" : "Hide controls");
+    if (!hidden) controlsEl.classList.remove("is-open");
+    measureTopbar();
+  }
+  apply();
+
+  toggleEl.addEventListener("click", function () {
+    if (hidden && !controlsEl.classList.contains("is-open") && bigScreen) {
+      controlsEl.classList.add("is-open");        // on a computer the first click just opens it
+      return;
+    }
+    hidden = !hidden;
+    try { localStorage.setItem("controlsHidden", hidden ? "1" : "0"); } catch (e) { /* fine */ }
+    apply();
+    if (hidden) controlsEl.classList.remove("is-open");
+  });
+
+  // Computer: mouse near the bottom brings the controls up; moving away hides them again
+  document.addEventListener("mousemove", function (event) {
+    if (!hidden) return;
+    const typing = controlsEl.contains(document.activeElement) && document.activeElement.tagName === "INPUT";
+    const sheetOpen = sheetEl && !sheetEl.hidden;
+    if (event.clientY > window.innerHeight - 70) controlsEl.classList.add("is-open");
+    else if (!typing && !sheetOpen && !controlsEl.matches(":hover")) controlsEl.classList.remove("is-open");
+  });
+})();

@@ -736,3 +736,79 @@ select.btn { background: var(--card); color: var(--ink); }
 @keyframes checkIn { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
 @media (min-width: 800px) { .check-bar { left: 4%; bottom: 26%; } }
 @media (prefers-reduced-motion: reduce) { .check-bar { animation: none; } }
+
+
+/* The lecturer breathes: a very slow, tiny rise and tilt, so the picture never looks frozen */
+.tile-photo img { transform-origin: 50% 100%; animation: lecturer-breathe 5.5s ease-in-out infinite; }
+@keyframes lecturer-breathe {
+  0%   { transform: translateY(0) scale(1.02) rotate(0deg); }
+  35%  { transform: translateY(-2px) scale(1.032) rotate(0.35deg); }
+  70%  { transform: translateY(-1px) scale(1.028) rotate(-0.35deg); }
+  100% { transform: translateY(0) scale(1.02) rotate(0deg); }
+}
+@media (prefers-reduced-motion: reduce) { .tile-photo img { animation: none !important; } }
+
+
+
+/* =========================================================
+   BATCH 2: a board that really looks fixed to the wall, a bigger desktop picture,
+   and controls that can be hidden (tap the small arrow tab; on a computer they also slide up
+   when the mouse goes near the bottom of the window)
+   ========================================================= */
+
+/* ---- Board: a solid panel screwed to the wall, with a real wall shadow (no glow, no floating look) ---- */
+.board {
+  border: 5px solid #121722;
+  border-radius: 5px;
+  background: linear-gradient(135deg, rgba(22, 32, 56, 0.97), rgba(15, 23, 43, 0.96)) padding-box;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 1px 1px rgba(10, 14, 24, 0.55),
+    0 5px 8px -2px rgba(20, 26, 40, 0.40),
+    0 18px 26px -10px rgba(20, 26, 40, 0.38);
+}
+.board::after { background: linear-gradient(115deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 28%); }
+/* the dark fade over the photo is gentler, so the wall keeps its natural light */
+.stage::before { background: linear-gradient(180deg, rgba(8, 12, 24, 0.22), rgba(8, 12, 24, 0) 24%, rgba(8, 12, 24, 0) 62%, rgba(8, 12, 24, 0.5)); }
+
+/* phone: a little air around the board */
+.board { left: 5%; right: 5%; }
+
+/* desktop: the board stays on the plain wall: clear of the plant on the left, the chair on the right and the table below */
+@media (min-width: 800px) {
+  .board { left: 11%; right: 11%; top: 6%; width: auto; height: 49%; }
+  .stage-wrap { padding: 10px 24px 6px; }
+  .stage { width: min(100%, max(600px, calc((100vh - var(--topbar-h, 80px) - 235px) * 3 / 2))); }
+}
+
+/* ---- Hide / show the controls ---- */
+.ctrl-toggle-row { display: flex; justify-content: center; margin: -6px 0 4px; }
+.ctrl-toggle {
+  width: 56px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--card); color: var(--muted, #8a93a8); cursor: pointer;
+}
+.ctrl-toggle svg { transition: transform 0.2s; }
+body.controls-hidden .ctrl-toggle svg { transform: rotate(180deg); }
+
+body.controls-hidden .controls {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  transform: translateY(calc(100% - 28px));       /* only the little tab stays visible */
+  transition: transform 0.25s ease;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.25);
+}
+body.controls-hidden .controls.is-open { transform: none; }
+
+/* with the controls hidden, the picture takes the room: phones fill the screen, computers get a much bigger picture */
+body.controls-hidden .stage { aspect-ratio: auto; height: calc(100svh - var(--topbar-h, 80px) - 52px); }
+@media (min-width: 800px) {
+  body.controls-hidden .stage {
+    aspect-ratio: 3 / 2; height: auto;
+    width: min(100%, max(600px, calc((100vh - var(--topbar-h, 80px) - 70px) * 3 / 2)));
+  }
+}
+@media (prefers-reduced-motion: reduce) { body.controls-hidden .controls { transition: none; } }

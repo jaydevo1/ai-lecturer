@@ -1943,7 +1943,116 @@ function friendlyError(error) {
    14. ROUTES
    --------------------------------------------------------- */
 app.get("/api/health", function (req, res) {
-  res.json({ ok: true, models: MODEL_LIST, timeoutSeconds: TIMEOUT_MS / 1000, groq: groqKeyStatus });
+  res.json({ ok: true, models: MODEL_LIST, timeoutSeconds: TIMEOUT_MS / 1000, groq: groqKeyStatus, voice: TTS_ON ? { on: true, name: TTS_VOICE } : { on: false } });
+});
+
+// ---- Natural voice for the classroom (Gemini text-to-speech) ----
+// Each piece of text is made ONCE, saved, and then served to everybody from the saved copy.
+// Switch it on with TTS_ENABLED=1 on Render. If Google refuses (daily limit), the classroom quietly uses the phone voice.
+const TTS_ON = ["1", "true", "yes", "on"].indexOf(String(process.env.TTS_ENABLED || "").toLowerCase()) >= 0;
+const TTS_VOICE = String(process.env.TTS_VOICE || "Charon").trim();
+const TTS_MODEL_ORDER = String(process.env.TTS_MODELS || "gemini-3.8-flash-lite-tts,gemini-3.8-flash-tts").split(",").map(function (m) { return m.trim(); }).filter(Boolean);
+const TTS_DAILY_MAX = Number(process.env.TTS_DAILY_MAX || 80);     // new clips per day, a safety stop
+let ttsDay = "", ttsMade = 0;
+const ttsBlockedUntil = {};                                         // model -> time when Google said "try later"
+const ttsInFlight = new Map();                                      // same text asked twice at once = one request
+
+function wavToMp3(wav) {
+  // Google sends a WAV file. A small MP3 is about 10 times lighter on mobile data.
+  return import("@breezystack/lamejs").then(function (lame) {
+    let pos = 12, rate = 24000, dataStart = -1, dataLen = 0;
+    while (pos + 8 <= wav.length) {
+      const id = wav.toString("ascii", pos, pos + 4), size = wav.readUInt32LE(pos + 4);
+      if (id === "fmt ") rate = wav.readUInt32LE(pos + 12);
+      if (id === "data") { dataStart = pos + 8; dataLen = Math.min(size, wav.length - dataStart); break; }
+      pos += 8 + size;
+    }
+    if (dataStart < 0) throw new Error("not a WAV file");
+    const samples = new Int16Array(wav.buffer.slice(wav.byteOffset + dataStart, wav.byteOffset + dataStart + (dataLen - dataLen % 2)));
+    const encoder = new lame.Mp3Encoder(1, rate, 48);
+    const out = [];
+    for (let i = 0; i < samples.length; i += 1152) {
+      const chunk = encoder.encodeBuffer(samples.subarray(i, i + 1152));
+      if (chunk.length) out.push(Buffer.from(chunk));
+    }
+    out.push(Buffer.from(encoder.flush()));
+    return Buffer.concat(out);
+  });
+}
+
+// Asks Google for speech; returns audio bytes and what kind of file it is
+async function makeSpeech(text) {
+  let lastError = "no voice model is set";
+  for (const model of TTS_MODEL_ORDER) {
+    if ((ttsBlockedUntil[model] || 0) > Date.now()) { lastError = model + " is resting after a limit"; continue; }
+    try {
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+        method: "POST",
+        headers: { "x-goog-api-key": API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: model,
+          input: [{ type: "user_input", content: [{ type: "text", text: text }] }],
+          response_format: { type: "audio" },
+          generation_config: { speech_config: [{ voice: TTS_VOICE }] }
+        }),
+        signal: AbortSignal.timeout(90000)
+      });
+      const raw = await r.text();
+      if (!r.ok) {
+        lastError = model + ": HTTP " + r.status;
+        console.log("[voice] " + lastError + " " + raw.slice(0, 200));
+        if (r.status === 429) ttsBlockedUntil[model] = Date.now() + 30 * 60 * 1000;   // rest 30 minutes
+        else if (r.status === 503 || r.status === 500) ttsBlockedUntil[model] = Date.now() + 60 * 1000;
+        continue;
+      }
+      let audio = null;
+      try {
+        (JSON.parse(raw).steps || []).forEach(function (st) {
+          if (st.type !== "model_output") return;
+          (st.content || []).forEach(function (c) { if (c.type === "audio" && c.data) audio = c.data; });
+        });
+      } catch (e) { /* handled below */ }
+      if (!audio) { lastError = model + ": no audio in the answer"; continue; }
+      const wav = Buffer.from(audio, "base64");
+      try { return { bytes: await wavToMp3(wav), mime: "audio/mpeg", model: model }; }
+      catch (e) { console.log("[voice] MP3 step failed, sending WAV: " + e.message); return { bytes: wav, mime: "audio/wav", model: model }; }
+    } catch (e) {
+      lastError = model + ": " + e.message;
+      console.log("[voice] " + lastError);
+    }
+  }
+  throw new Error(lastError);
+}
+
+app.post("/api/voice", async function (req, res) {
+  if (!TTS_ON) return res.status(503).json({ error: "The natural voice is switched off.", fallback: true });
+  const text = String((req.body && req.body.text) || "").replace(/\s+/g, " ").trim();
+  if (!text || text.length > 700) return res.status(400).json({ error: "Text must be 1 to 700 characters." });
+  const key = crypto.createHash("sha1").update(TTS_VOICE + "|" + text).digest("hex");
+  try {
+    let saved = await store.voiceGet(key);
+    let hit = Boolean(saved);
+    let mime = "audio/mpeg";
+    if (saved) { if (saved.slice(0, 4).toString("ascii") === "RIFF") mime = "audio/wav"; }
+    else {
+      const today = new Date().toISOString().slice(0, 10);
+      if (ttsDay !== today) { ttsDay = today; ttsMade = 0; }
+      if (ttsMade >= TTS_DAILY_MAX) return res.status(503).json({ error: "Today's voice allowance is used up.", fallback: true });
+      let job = ttsInFlight.get(key);
+      if (!job) {
+        ttsMade++;
+        job = makeSpeech(text).finally(function () { ttsInFlight.delete(key); });
+        ttsInFlight.set(key, job);
+      }
+      const made = await job;
+      saved = made.bytes; mime = made.mime;
+      store.voicePut(key, saved).catch(function (e) { console.log("[voice] could not save clip: " + e.message); });
+    }
+    res.set({ "Content-Type": mime, "Cache-Control": "public, max-age=86400", "X-Voice-Cache": hit ? "hit" : "new" });
+    res.send(saved);
+  } catch (e) {
+    res.status(503).json({ error: "Voice not available right now: " + e.message, fallback: true });
+  }
 });
 
 // ---- Voice test (lab): makes speech with Gemini's text-to-speech and returns it as base64 audio ----

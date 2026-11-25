@@ -91,6 +91,16 @@ module.exports = function createStore(options) {
       if (!ID_RE.test(String(id))) return null;
       try { return fs.readFileSync(path.join(DOCS_DIR, id + ".pdf")); } catch (e) { return null; }
     },
+    // Saved voice clips (so each sentence is only ever made once)
+    voicePut: async function (key, buffer, mime) {
+      const dir = path.join(CACHE_DIR, "voice");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, key + ".bin"), buffer);
+    },
+    voiceGet: async function (key) {
+      if (!/^[a-f0-9]{40}$/.test(String(key))) return null;
+      try { return fs.readFileSync(path.join(CACHE_DIR, "voice", key + ".bin")); } catch (e) { return null; }
+    },
     // Everything ever uploaded (only used on your own computer, where there are no accounts)
     listAll: async function () {
       let files = [];
@@ -179,6 +189,24 @@ module.exports = function createStore(options) {
       }
       pdfMemory.set(id, buffer);
     },
+    voicePut: async function (key, buffer, mime) {
+      const response = await fetch(SUPABASE_URL + "/storage/v1/object/voice/" + key + ".bin", {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/octet-stream", "x-upsert": "true" }, authHeaders(SECRET_KEY)),
+        body: buffer,
+        signal: AbortSignal.timeout(60000)
+      });
+      if (!response.ok) throw new Error("Supabase voice upload failed: HTTP " + response.status + " " + (await response.text()).slice(0, 200));
+    },
+    voiceGet: async function (key) {
+      if (!/^[a-f0-9]{40}$/.test(String(key))) return null;
+      const response = await fetch(SUPABASE_URL + "/storage/v1/object/voice/" + key + ".bin", {
+        headers: authHeaders(SECRET_KEY),
+        signal: AbortSignal.timeout(30000)
+      });
+      if (!response.ok) return null;
+      return Buffer.from(await response.arrayBuffer());
+    },
     pdfGet: async function (id) {
       if (!ID_RE.test(String(id))) return null;
       const memory = pdfMemory.get(id);
@@ -255,6 +283,12 @@ module.exports = function createStore(options) {
         body: JSON.stringify({ id: "pdfs", name: "pdfs", public: false }),
         signal: AbortSignal.timeout(15000)
       });
+      await fetch(SUPABASE_URL + "/storage/v1/bucket", {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, authHeaders(SECRET_KEY)),
+        body: JSON.stringify({ id: "voice", name: "voice", public: false }),
+        signal: AbortSignal.timeout(15000)
+      });
     } catch (e) { /* fine */ }
   }
 
@@ -268,6 +302,8 @@ module.exports = function createStore(options) {
     docFindByHash: backend.docFindByHash,
     pdfPut: backend.pdfPut,
     pdfGet: backend.pdfGet,
+    voicePut: backend.voicePut,
+    voiceGet: backend.voiceGet,
     listAll: disk.listAll,
     accounts: accounts,
     ensureBucket: ensureBucket
