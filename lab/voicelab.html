@@ -120,7 +120,7 @@ resetReport();
 /* ============ the mouth level (0 to 1), fed by whatever is speaking ============ */
 let mouthLevel = 0;          // smoothed
 let mouthTarget = 0;         // raw
-let analyser = null, analyserData = null;
+let analyser = null, analyserData = null, levelGain = 5;
 let nextSyllable = 0, syllableCount = 0;
 let guessing = false;        // true for the phone voice (no real audio to read)
 let speaking = false;
@@ -131,7 +131,7 @@ function readAudioLevel() {
   let sum = 0;
   for (let i = 0; i < analyserData.length; i++) { const v = (analyserData[i] - 128) / 128; sum += v * v; }
   const rms = Math.sqrt(sum / analyserData.length);
-  return Math.min(1, rms * 5);         // scale so normal speech reaches about 0.5 to 1
+  return Math.min(1, rms * levelGain);         // scale so normal speech reaches about 0.5 to 1
 }
 
 /* ============ 2D photo avatar: closed / half / wide / blink, chosen by the audio level ============ */
@@ -406,13 +406,20 @@ async function speakServer(text) {
   let buf;
   try { buf = await c.decodeAudioData(bytes.buffer); }
   catch (e) { report("Server voice made audio but the phone could not read it: " + e.message); return; }
+  // Auto-volume for the mouth: we have the whole sound, so measure how loud this voice really is
+  // (deep or quiet voices like Charon would otherwise barely open the mouth) and scale to suit.
+  const ch = buf.getChannelData(0), win = Math.floor(buf.sampleRate * 0.05), loudness = [];
+  for (let a = 0; a + win < ch.length; a += win) { let q = 0; for (let k = a; k < a + win; k++) q += ch[k] * ch[k]; loudness.push(Math.sqrt(q / win)); }
+  loudness.sort(function (x, y) { return x - y; });
+  const p90 = loudness[Math.floor(loudness.length * 0.9)] || 0.1;
+  levelGain = Math.max(2, Math.min(30, 0.6 / p90));
   report("Server voice OK: " + voice + ", " + model + ". Made " + buf.duration.toFixed(1) + " s of speech in " + made.toFixed(1) + " s. File about " + fileKb + " KB.");
   capEl.textContent = text;
   await new Promise(function (resolve) {
     const src = c.createBufferSource();
     src.buffer = buf; src.connect(analyser);
     currentSource = src; speaking = true; guessing = false;
-    src.onended = function () { currentSource = null; speaking = false; resolve(); };
+    src.onended = function () { currentSource = null; speaking = false; levelGain = 5; resolve(); };
     src.start();
   });
 }
