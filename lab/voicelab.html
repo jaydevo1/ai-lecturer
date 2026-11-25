@@ -25,6 +25,14 @@
   .board h3 { margin: 0 0 4px; font-size: .9rem; color: var(--gold); }
   .board p { margin: 0; font-size: .8rem; line-height: 1.45; }
   #photoBox { position: absolute; left: 0; right: 0; top: 26%; bottom: 0; display: none; align-items: flex-end; justify-content: center; }
+  #photoBox img { transform-origin: 50% 100%; animation: breathe 5.5s ease-in-out infinite; }
+  @keyframes breathe {
+    0%   { transform: translateY(0) scale(1) rotate(0deg); }
+    35%  { transform: translateY(-3px) scale(1.012) rotate(0.35deg); }
+    70%  { transform: translateY(-1px) scale(1.008) rotate(-0.35deg); }
+    100% { transform: translateY(0) scale(1) rotate(0deg); }
+  }
+  @media (prefers-reduced-motion: reduce) { #photoBox img { animation: none; } }
   #photoBox img { height: 100%; max-width: 100%; object-fit: contain; object-position: bottom; }
   #av3d { position: absolute; left: 0; right: 0; top: 22%; bottom: 0; display: none; }
   .cap { position: absolute; left: 4%; right: 4%; bottom: 3%; padding: 8px 12px; border-radius: 10px; background: rgba(0,0,0,.55); font-size: .8rem; z-index: 3; min-height: 2.2em; }
@@ -46,7 +54,7 @@
 
   <div class="stage" id="stage">
     <div class="board"><h3>The Process</h3><p>A process is a program in execution. It has its own address space, a program counter, registers and a stack.</p></div>
-    <div id="photoBox"><img id="photo" alt="Lecturer" src="../images/lecturer-closed.webp"></div>
+    <div id="photoBox"><img id="photo" alt="Lecturer" src="../images/sprites/closed.webp"></div>
     <div id="av3d"></div>
     <div class="cap" id="cap">Pick an avatar and a voice, then press Speak.</div>
   </div>
@@ -119,13 +127,18 @@ function readAudioLevel() {
 
 /* ============ 2D photo avatar: closed / half / wide / blink, chosen by the audio level ============ */
 const photo = $("photo");
-const PHOTOS = { closed: "../images/lecturer-closed.webp", half: "../images/lecturer-half.webp", wide: "../images/lecturer-wide.webp", blink: "../images/lecturer-blink.webp" };
+const SP = "../images/sprites/";
+const PHOTOS = { closed: SP+"closed.webp", eh: SP+"eh.webp", ah: SP+"ah.webp", oo: SP+"oo.webp", ee: SP+"ee.webp", fv: SP+"fv.webp", blink: SP+"blink.webp" };
 Object.values(PHOTOS).forEach(function (src) { const i = new Image(); i.src = src; });   // preload so there is no flicker
-let photoState = "closed", blinkUntil = 0, nextBlink = performance.now() + 3000;
+let photoState = "closed", blinkUntil = 0, nextBlink = performance.now() + 3000, midPick = 0, wasOpen = false;
+const MID = ["ee", "oo", "eh", "ee", "fv", "oo"];   // the mid mouth shapes take turns, so it does not look like one stuck shape
 
 function paint2d(now) {
   let want = "closed";
-  if (mouthLevel > 0.42) want = "wide"; else if (mouthLevel > 0.14) want = "half";
+  const open = mouthLevel > 0.14;
+  if (open && !wasOpen) midPick = (midPick + 1) % MID.length;   // a new mouth opening picks the next shape
+  wasOpen = open;
+  if (mouthLevel > 0.5) want = "ah"; else if (mouthLevel > 0.3) want = MID[midPick]; else if (open) want = "eh";
   if (want === "closed") {
     if (now > nextBlink) { blinkUntil = now + 140; nextBlink = now + 2500 + Math.random() * 3500; }
     if (now < blinkUntil) want = "blink";
