@@ -239,15 +239,28 @@ async function loadNeural() {
   try {
     capEl.textContent = "Downloading the neural voice... (only the first time)";
     const mod = await import("https://cdn.jsdelivr.net/npm/kokoro-js@1.2.1/+esm");
-    const hasGpu = "gpu" in navigator;
-    const device = hasGpu ? "webgpu" : "wasm";
-    tts = await mod.KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
-      dtype: "q8",
-      device: device,
-      progress_callback: function (p) {
-        if (p && p.status === "progress" && p.total) btn.textContent = "Downloading... " + Math.round(p.loaded / p.total * 100) + "%";
-      }
-    });
+    // Some phones say they have WebGPU but cannot really use it, so check, and fall back to the plain processor (WASM)
+    let device = "wasm";
+    if ("gpu" in navigator) {
+      try { const adapter = await navigator.gpu.requestAdapter(); if (adapter) device = "webgpu"; } catch (e) { /* use wasm */ }
+    }
+    const options = function (d) {
+      return {
+        dtype: "q8",
+        device: d,
+        progress_callback: function (p) {
+          if (p && p.status === "progress" && p.total) btn.textContent = "Downloading... " + Math.round(p.loaded / p.total * 100) + "%";
+        }
+      };
+    };
+    try {
+      tts = await mod.KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", options(device));
+    } catch (firstError) {
+      if (device === "wasm") throw firstError;
+      report("WebGPU did not work, trying the plain processor...");
+      device = "wasm";
+      tts = await mod.KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", options("wasm"));
+    }
     btn.textContent = "Neural voice (ready)";
     report("Neural voice loaded in " + ((performance.now() - t0) / 1000).toFixed(1) + " s using " + device);
     capEl.textContent = "Neural voice ready.";
