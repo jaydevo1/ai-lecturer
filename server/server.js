@@ -1946,6 +1946,61 @@ app.get("/api/health", function (req, res) {
   res.json({ ok: true, models: MODEL_LIST, timeoutSeconds: TIMEOUT_MS / 1000, groq: groqKeyStatus });
 });
 
+// ---- Voice test (lab): makes speech with Gemini's text-to-speech and returns it as base64 audio ----
+// Nothing is saved yet. This only tells us how the voice sounds and what the free limit allows.
+const TTS_MODELS = ["gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"];
+app.post("/api/tts", async function (req, res) {
+  const text = String((req.body && req.body.text) || "").trim().slice(0, 1500);
+  const voice = String((req.body && req.body.voice) || "Kore").trim().slice(0, 60);
+  let model = String((req.body && req.body.model) || TTS_MODELS[0]).trim();
+  if (TTS_MODELS.indexOf(model) < 0) model = TTS_MODELS[0];
+  if (!text) return res.status(400).json({ error: "No text." });
+  const t0 = Date.now();
+  try {
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: { "x-goog-api-key": API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: model,
+        input: [{ type: "user_input", content: [{ type: "text", text: text }] }],
+        response_format: { type: "audio" },
+        generation_config: { speech_config: [{ voice: voice }] }
+      })
+    });
+    const raw = await r.text();
+    if (!r.ok) {
+      console.log("[tts] " + model + " / " + voice + " failed: HTTP " + r.status + " " + raw.slice(0, 300));
+      return res.status(502).json({ error: "Google said HTTP " + r.status + ": " + raw.slice(0, 400) });
+    }
+    let data = null;
+    try {
+      const j = JSON.parse(raw);
+      const steps = (j.steps || []).filter(function (x) { return x.type === "model_output"; });
+      const parts = [];
+      steps.forEach(function (st) { (st.content || []).forEach(function (c) { if (c.type === "audio" && c.data) parts.push(c); }); });
+      if (parts.length) data = parts[parts.length - 1].data;
+    } catch (e) { /* handled below */ }
+    if (!data) return res.status(502).json({ error: "Google answered but there was no audio in it: " + raw.slice(0, 300) });
+    console.log("[tts] " + model + " / " + voice + " OK in " + (Date.now() - t0) + " ms");
+    res.json({ ok: true, model: model, voice: voice, ms: Date.now() - t0, audio: data });
+  } catch (e) {
+    res.status(502).json({ error: "Could not reach Google: " + e.message });
+  }
+});
+
+// Lists Google's extra voices (so we can find the exact name of one like Varo)
+app.get("/api/tts/voices", async function (req, res) {
+  try {
+    const q = new URLSearchParams();
+    if (req.query.search) q.set("search", String(req.query.search).slice(0, 40));
+    q.set("page_size", "50");
+    const r = await fetch("https://generativelanguage.googleapis.com/v1beta/voices?" + q.toString(), { headers: { "x-goog-api-key": API_KEY } });
+    const raw = await r.text();
+    if (!r.ok) return res.status(502).json({ error: "Google said HTTP " + r.status + ": " + raw.slice(0, 300) });
+    res.json(JSON.parse(raw));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 // Model names your key can see (not a promise that they work on the free tier)
 app.get("/api/models", async function (req, res) {
   try {

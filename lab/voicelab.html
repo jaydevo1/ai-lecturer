@@ -66,13 +66,20 @@
 
   <div class="row"><span class="lbl">2. Voice</span>
     <button id="btnPhone" class="on">Phone voice</button>
-    <button id="btnNeural">Neural voice (free, downloads about 85 MB once)</button>
+    <button id="btnServer">Server voice (Gemini)</button>
+    <button id="btnNeural">Neural voice (heavy, hangs small phones)</button>
     <select id="voiceSel" hidden>
       <option value="am_michael">Male (American, calm)</option>
       <option value="am_adam">Male (American, deeper)</option>
       <option value="bm_george">Male (British)</option>
       <option value="af_heart">Female (American)</option>
     </select>
+  </div>
+  <div class="row" id="serverBox" hidden>
+    <span class="lbl">Server voice name (try Varo first; if it fails, try Kore or Charon)</span>
+    <input id="srvVoice" value="Varo" style="font:inherit;padding:9px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:9em">
+    <select id="srvModel"><option value="gemini-3.8-flash-tts">Flash TTS</option><option value="gemini-3.8-flash-lite-tts">Flash-Lite TTS</option></select>
+    <button id="btnFind">Find voice names</button>
   </div>
   <p class="note" id="engineNote">Phone voice is what the app uses now. The mouth cannot follow it exactly, so it is a guess.</p>
 
@@ -87,6 +94,7 @@
   <pre id="report">Not run yet.</pre>
 </div>
 
+<script src="../config.js"></script>
 <script type="importmap">
 { "imports": {
   "three": "./vendor/three/build/three.module.js",
@@ -349,13 +357,76 @@ function setEngine(e) {
   engine = e;
   $("btnPhone").classList.toggle("on", e === "phone");
   $("btnNeural").classList.toggle("on", e === "neural");
+  $("btnServer").classList.toggle("on", e === "server");
+  $("serverBox").hidden = e !== "server";
   $("voiceSel").hidden = e !== "neural";
   $("engineNote").textContent = e === "phone"
     ? "Phone voice is what the app uses now. The mouth cannot follow it exactly, so it is a guess."
+    : e === "server"
+    ? "Server voice is made by Google on the server and sent to your phone as a sound file, so the mouth follows the real sound. Your phone does no heavy work."
     : "Neural voice makes real audio inside the browser, so the mouth follows the actual sound.";
 }
 $("btnPhone").addEventListener("click", function () { setEngine("phone"); });
 $("btnNeural").addEventListener("click", async function () { setEngine("neural"); await loadNeural(); });
+$("btnServer").addEventListener("click", function () { setEngine("server"); });
+
+/* ============ voice engine 3: Gemini voice made on our server ============ */
+function serverBase() {
+  const c = window.APP_CONFIG || {};
+  const local = ["127.0.0.1", "localhost", ""].includes(location.hostname);
+  return local ? "http://127.0.0.1:3000" : String(c.serverUrl || "").replace(/\/+$/, "");
+}
+function serverHeaders() {
+  let code = "";
+  try { code = localStorage.getItem("accessCode") || ""; } catch (e) { /* fine */ }
+  const h = { "Content-Type": "application/json" };
+  if (code) h["x-access-code"] = code;
+  return h;
+}
+async function speakServer(text) {
+  const voice = $("srvVoice").value.trim() || "Kore";
+  const model = $("srvModel").value;
+  capEl.textContent = "Making the voice on the server (" + voice + ")... the first one can take 10 to 30 seconds.";
+  const t0 = performance.now();
+  let j;
+  try {
+    const r = await fetch(serverBase() + "/api/tts", { method: "POST", headers: serverHeaders(), body: JSON.stringify({ text: text, voice: voice, model: model }) });
+    j = await r.json();
+    if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  } catch (e) {
+    report("Server voice FAILED (" + voice + ", " + model + "): " + e.message);
+    capEl.textContent = "The server voice failed. Screenshot the report below and send it to me.";
+    return;
+  }
+  const made = (performance.now() - t0) / 1000;
+  const bin = atob(j.audio), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const fileKb = Math.round(bytes.length / 1024);
+  const c = audioContext();
+  let buf;
+  try { buf = await c.decodeAudioData(bytes.buffer); }
+  catch (e) { report("Server voice made audio but the phone could not read it: " + e.message); return; }
+  report("Server voice OK: " + voice + ", " + model + ". Made " + buf.duration.toFixed(1) + " s of speech in " + made.toFixed(1) + " s. File about " + fileKb + " KB.");
+  capEl.textContent = text;
+  await new Promise(function (resolve) {
+    const src = c.createBufferSource();
+    src.buffer = buf; src.connect(analyser);
+    currentSource = src; speaking = true; guessing = false;
+    src.onended = function () { currentSource = null; speaking = false; resolve(); };
+    src.start();
+  });
+}
+$("btnFind").addEventListener("click", async function () {
+  capEl.textContent = "Looking up voice names...";
+  try {
+    const r = await fetch(serverBase() + "/api/tts/voices?search=" + encodeURIComponent($("srvVoice").value.trim()), { headers: serverHeaders() });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+    const list = (j.voices || []).slice(0, 12).map(function (v) { return (v.display_name || v.displayName || "?") + " = " + (v.id || v.name || "?"); });
+    report("Voices found: " + (list.length ? "\n" + list.join("\n") : "none (" + JSON.stringify(j).slice(0, 200) + ")"));
+    capEl.textContent = "Done. See the report below.";
+  } catch (e) { report("Voice lookup FAILED: " + e.message); capEl.textContent = "Lookup failed. See the report below."; }
+});
 
 $("btnSpeak").addEventListener("click", async function () {
   stopFlag = false;
@@ -364,6 +435,7 @@ $("btnSpeak").addEventListener("click", async function () {
   if (!text) return;
   if (avatarMode === "3d" && head3dState !== "ready") await setAvatar("3d");
   if (engine === "phone") { capEl.textContent = text; await speakPhone(text); }
+  else if (engine === "server") await speakServer(text);
   else await speakNeural(text);
 });
 $("btnStop").addEventListener("click", function () {
