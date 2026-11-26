@@ -367,6 +367,40 @@ function renderMath(element, attempt) {
    Prefer a local English voice. Online voices ("Google ...",
    "... Online (Natural)") are slower and less reliable here.
    --------------------------------------------------------- */
+// ----- Male or female lecturer -----
+// Phones do not say whether a voice is male or female, so we guess from the voice name.
+// The learner can always switch in the settings (and that choice is remembered).
+const MALE_VOICE_RE   = /\b(david|mark|guy|ryan|alex|daniel|george|james|richard|christopher|eric|thomas|fred|paul|brian|matthew|male)\b|#male/i;
+const FEMALE_VOICE_RE = /\b(zira|hazel|susan|samantha|victoria|karen|moira|fiona|aria|jenny|linda|heather|catherine|emma|eva|hedda|tessa|serena|joanna|salli|kimberly|female)\b|#female|female_\d/i;
+let lecturerGender = "male";
+
+function voiceLabel(v) { return v.name + " " + (v.voiceURI || ""); }
+
+function savedLecturer() {
+  try { const g = localStorage.getItem("lecturer"); return g === "female" || g === "male" ? g : ""; } catch (e) { return ""; }
+}
+
+// With no saved choice: male if the phone has a male voice, female if it only has female voices, otherwise male
+function detectLecturer() {
+  if (!speechSupported) return "male";
+  const english = window.speechSynthesis.getVoices().filter(function (v) { return v.lang && v.lang.toLowerCase().replace("_", "-").startsWith("en"); });
+  const hasMale = english.some(function (v) { return MALE_VOICE_RE.test(voiceLabel(v)); });
+  const hasFemale = english.some(function (v) { return FEMALE_VOICE_RE.test(voiceLabel(v)); });
+  if (hasMale) return "male";
+  if (hasFemale) return "female";
+  return "male";
+}
+
+// Swaps the face pictures (male or female set)
+function applyLecturer(gender) {
+  lecturerGender = gender === "female" ? "female" : "male";
+  const folder = lecturerGender === "female" ? "images/sprites_f/" : "images/sprites/";
+  Object.keys(FACES).forEach(function (name) { FACES[name] = folder + name + ".webp"; new Image().src = FACES[name]; });
+  if (faceImgEl) faceImgEl.src = FACES[currentFace] || FACES.closed;
+  const picker = document.getElementById("lecturerSelect");
+  if (picker) picker.value = lecturerGender;
+}
+
 function pickVoice() {
   if (!speechSupported) return null;
   const voices = window.speechSynthesis.getVoices();
@@ -390,9 +424,10 @@ function pickVoice() {
     if (lang === "en-gb" || lang === "en-ng") points += 3;
     else if (lang === "en-us") points += 2;
     if (/natural|online/i.test(v.name)) points -= 5;     // online voices lag
-    // The lecturer's face is male, so prefer a male voice when the device has one
-    if (/\b(david|mark|guy|ryan|alex|daniel|george|james|richard|christopher|eric|thomas|fred|male)\b/i.test(v.name)) points += 12;
-    if (/\b(zira|hazel|susan|samantha|victoria|karen|moira|fiona|female|aria|jenny)\b/i.test(v.name)) points -= 4;
+    // Prefer a voice that matches the lecturer's face (male or female)
+    const isMale = MALE_VOICE_RE.test(voiceLabel(v)), isFemale = FEMALE_VOICE_RE.test(voiceLabel(v));
+    if (lecturerGender === "female") { if (isFemale) points += 12; if (isMale) points -= 4; }
+    else { if (isMale) points += 12; if (isFemale) points -= 4; }
     return points;
   }
   english.sort(function (a, b) { return score(b) - score(a); });
@@ -417,10 +452,30 @@ function fillVoicePicker() {
   if (chosenVoice) picker.value = chosenVoice.name;
 }
 
+applyLecturer(savedLecturer() || detectLecturer());
+
+// The settings choice: Male / Female lecturer (face and voice together)
+(function setupLecturerChoice() {
+  const picker = document.getElementById("lecturerSelect");
+  if (!picker) return;
+  picker.value = lecturerGender;
+  picker.addEventListener("change", function () {
+    try { localStorage.setItem("lecturer", picker.value); localStorage.removeItem("lecturerVoice"); } catch (e) { /* fine */ }
+    applyLecturer(picker.value);
+    chosenVoice = pickVoice();
+    fillVoicePicker();
+    clipCache.clear();                       // natural-voice clips are per lecturer
+    if (isPlaying && lesson) { stopSpeaking(); showSegment(current, true); }
+  });
+})();
+
 if (speechSupported) {
   chosenVoice = pickVoice();
   // Chrome loads its voice list a moment after the page opens
-  window.speechSynthesis.onvoiceschanged = function () { chosenVoice = pickVoice(); fillVoicePicker(); };
+  window.speechSynthesis.onvoiceschanged = function () {
+    if (!savedLecturer()) applyLecturer(detectLecturer());   // no saved choice yet: follow the phone's voices
+    chosenVoice = pickVoice(); fillVoicePicker();
+  };
   fillVoicePicker();
   const voicePickerEl = document.getElementById("voiceSelect");
   if (voicePickerEl) voicePickerEl.addEventListener("change", function () {
@@ -491,12 +546,13 @@ function stopClip() {
 
 // Downloads one clip and turns it into sound. Remembered, so repeating is instant.
 function getClip(text) {
-  if (clipCache.has(text)) return clipCache.get(text);
+  const cacheKey = lecturerGender + "|" + text;
+  if (clipCache.has(cacheKey)) return clipCache.get(cacheKey);
   const job = (async function () {
     let response;
     const timeout = new Promise(function (_, reject) { setTimeout(function () { reject(new Error("voice took too long")); }, 75000); });
     response = await Promise.race([
-      apiFetch("/api/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: text }) }),
+      apiFetch("/api/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: text, gender: lecturerGender }) }),
       timeout
     ]);
     if (!response.ok) throw new Error("voice HTTP " + response.status);
@@ -511,8 +567,8 @@ function getClip(text) {
     buffer.mouthGain = Math.max(2, Math.min(30, 0.6 / p90));
     return buffer;
   })();
-  clipCache.set(text, job);
-  job.catch(function () { clipCache.delete(text); });
+  clipCache.set(cacheKey, job);
+  job.catch(function () { clipCache.delete(cacheKey); });
   if (clipCache.size > 14) clipCache.delete(clipCache.keys().next().value);   // keep memory small
   return job;
 }

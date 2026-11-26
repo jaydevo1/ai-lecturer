@@ -1943,14 +1943,15 @@ function friendlyError(error) {
    14. ROUTES
    --------------------------------------------------------- */
 app.get("/api/health", function (req, res) {
-  res.json({ ok: true, models: MODEL_LIST, timeoutSeconds: TIMEOUT_MS / 1000, groq: groqKeyStatus, voice: TTS_ON ? { on: true, name: TTS_VOICE } : { on: false } });
+  res.json({ ok: true, models: MODEL_LIST, timeoutSeconds: TIMEOUT_MS / 1000, groq: groqKeyStatus, voice: TTS_ON ? { on: true, name: TTS_VOICE, female: TTS_VOICE_FEMALE } : { on: false } });
 });
 
 // ---- Natural voice for the classroom (Gemini text-to-speech) ----
 // Each piece of text is made ONCE, saved, and then served to everybody from the saved copy.
 // Switch it on with TTS_ENABLED=1 on Render. If Google refuses (daily limit), the classroom quietly uses the phone voice.
 const TTS_ON = ["1", "true", "yes", "on"].indexOf(String(process.env.TTS_ENABLED || "").toLowerCase()) >= 0;
-const TTS_VOICE = String(process.env.TTS_VOICE || "Charon").trim();
+const TTS_VOICE = String(process.env.TTS_VOICE || "Charon").trim();                 // the male lecturer
+const TTS_VOICE_FEMALE = String(process.env.TTS_VOICE_FEMALE || "Kore").trim();     // the female lecturer
 const TTS_MODEL_ORDER = String(process.env.TTS_MODELS || "gemini-3.8-flash-lite-tts,gemini-3.8-flash-tts").split(",").map(function (m) { return m.trim(); }).filter(Boolean);
 const TTS_DAILY_MAX = Number(process.env.TTS_DAILY_MAX || 80);     // new clips per day, a safety stop
 let ttsDay = "", ttsMade = 0;
@@ -1981,7 +1982,7 @@ function wavToMp3(wav) {
 }
 
 // Asks Google for speech; returns audio bytes and what kind of file it is
-async function makeSpeech(text) {
+async function makeSpeech(text, voiceName) {
   let lastError = "no voice model is set";
   for (const model of TTS_MODEL_ORDER) {
     if ((ttsBlockedUntil[model] || 0) > Date.now()) { lastError = model + " is resting after a limit"; continue; }
@@ -1993,7 +1994,7 @@ async function makeSpeech(text) {
           model: model,
           input: [{ type: "user_input", content: [{ type: "text", text: text }] }],
           response_format: { type: "audio" },
-          generation_config: { speech_config: [{ voice: TTS_VOICE }] }
+          generation_config: { speech_config: [{ voice: voiceName }] }
         }),
         signal: AbortSignal.timeout(90000)
       });
@@ -2028,7 +2029,8 @@ app.post("/api/voice", async function (req, res) {
   if (!TTS_ON) return res.status(503).json({ error: "The natural voice is switched off.", fallback: true });
   const text = String((req.body && req.body.text) || "").replace(/\s+/g, " ").trim();
   if (!text || text.length > 700) return res.status(400).json({ error: "Text must be 1 to 700 characters." });
-  const key = crypto.createHash("sha1").update(TTS_VOICE + "|" + text).digest("hex");
+  const voiceName = (req.body && req.body.gender === "female") ? TTS_VOICE_FEMALE : TTS_VOICE;
+  const key = crypto.createHash("sha1").update(voiceName + "|" + text).digest("hex");
   try {
     let saved = await store.voiceGet(key);
     let hit = Boolean(saved);
@@ -2041,7 +2043,7 @@ app.post("/api/voice", async function (req, res) {
       let job = ttsInFlight.get(key);
       if (!job) {
         ttsMade++;
-        job = makeSpeech(text).finally(function () { ttsInFlight.delete(key); });
+        job = makeSpeech(text, voiceName).finally(function () { ttsInFlight.delete(key); });
         ttsInFlight.set(key, job);
       }
       const made = await job;
